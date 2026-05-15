@@ -28,6 +28,8 @@ type pageData struct {
 	Projects       []models.Project
 	Tasks          []models.Task
 	Report         models.Report
+	ExportedReport string // Отчёт, сгенерированный экспортёром
+	ExportFormat   string // Формат экспорта (html, json, xml)
 	Error          string
 	Message        string
 	FilterStatus   string
@@ -49,8 +51,10 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/login", s.login)
 	mux.HandleFunc("/logout", s.logout)
 	mux.HandleFunc("/projects", s.createProject)
+	mux.HandleFunc("/projects/delete", s.deleteProject)
 	mux.HandleFunc("/tasks", s.createTask)
 	mux.HandleFunc("/tasks/status", s.changeTaskStatus)
+	mux.HandleFunc("/tasks/delete", s.deleteTask)
 	mux.HandleFunc("/report", s.report)
 	return mux
 }
@@ -152,13 +156,32 @@ func (s *Server) changeTaskStatus(w http.ResponseWriter, r *http.Request) {
 	redirectWithMessageTo(w, r, "/me", "task status changed")
 }
 
+func (s *Server) deleteTask(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	user, ok := s.currentUser(r)
+	if !ok {
+		redirectWithError(w, r, fmt.Errorf("login required"))
+		return
+	}
+	taskID, err := parseInt64(r.FormValue("task_id"))
+	if err != nil {
+		redirectWithErrorTo(w, r, "/me", err)
+		return
+	}
+	if err := s.tasks.Delete(contextWithRequest(r), taskID, user.ID); err != nil {
+		redirectWithErrorTo(w, r, "/me", err)
+		return
+	}
+	redirectWithMessageTo(w, r, "/me", "task deleted")
+}
+
 func (s *Server) render(w http.ResponseWriter, r *http.Request, data pageData) {
 	filter := models.TaskFilter{
 		Status:   models.Status(data.FilterStatus),
 		Priority: models.Priority(data.FilterPriority),
-	}
-	if data.Authenticated {
-		filter.AssigneeID = data.CurrentUser.ID
 	}
 	if data.ReportType == "" {
 		data.ReportType = models.ReportByStatus
@@ -174,14 +197,18 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, data pageData) {
 		if err != nil {
 			data.Error = err.Error()
 		}
-		report, err := s.reports.Build(ctx, data.ReportType, models.TaskFilter{AssigneeID: data.CurrentUser.ID})
-		if err != nil {
-			data.Error = err.Error()
+		// Генерируем HTML-отчёт только если он ещё не передан (например, из /report)
+		if data.ExportedReport == "" {
+			exported, err := s.reports.Build(ctx, models.TaskFilter{}, "html")
+			if err != nil {
+				data.Error = err.Error()
+			}
+			data.ExportedReport = string(exported)
+			data.ExportFormat = "html"
 		}
 		data.Users = []models.User{data.CurrentUser}
 		data.Projects = projects
 		data.Tasks = tasks
-		data.Report = report
 	}
 
 	tmpl, err := template.New("index.html").Funcs(template.FuncMap{
@@ -190,6 +217,9 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, data pageData) {
 				return ""
 			}
 			return value.Format("2006-01-02")
+		},
+		"safeHTML": func(html string) template.HTML {
+			return template.HTML(html)
 		},
 	}).ParseFiles("frontend/index.html")
 	if err != nil {

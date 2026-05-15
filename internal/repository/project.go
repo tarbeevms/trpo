@@ -17,15 +17,15 @@ func NewProjectRepository(db *sql.DB) *ProjectRepository {
 
 func (r *ProjectRepository) Create(ctx context.Context, project *models.Project) error {
 	return r.db.QueryRowContext(ctx, `
-		INSERT INTO projects (name, description, owner_id, created_by)
-		VALUES ($1, $2, $3, $4)
-		RETURNING id, created_at, updated_at
-	`, project.Name, project.Description, project.OwnerID, project.CreatedBy).Scan(&project.ID, &project.CreatedAt, &project.UpdatedAt)
+		INSERT INTO projects (name, description, owner_id)
+		VALUES ($1, $2, $3)
+		RETURNING id
+	`, project.Name, project.Description, project.OwnerID).Scan(&project.ID)
 }
 
 func (r *ProjectRepository) List(ctx context.Context) ([]models.Project, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, name, description, owner_id, created_at, updated_at, created_by
+		SELECT id, name, description, owner_id
 		FROM projects
 		WHERE deleted_at IS NULL
 		ORDER BY id
@@ -38,7 +38,7 @@ func (r *ProjectRepository) List(ctx context.Context) ([]models.Project, error) 
 	var projects []models.Project
 	for rows.Next() {
 		var project models.Project
-		if err := rows.Scan(&project.ID, &project.Name, &project.Description, &project.OwnerID, &project.CreatedAt, &project.UpdatedAt, &project.CreatedBy); err != nil {
+		if err := rows.Scan(&project.ID, &project.Name, &project.Description, &project.OwnerID); err != nil {
 			return nil, err
 		}
 		projects = append(projects, project)
@@ -48,7 +48,7 @@ func (r *ProjectRepository) List(ctx context.Context) ([]models.Project, error) 
 
 func (r *ProjectRepository) ListByOwner(ctx context.Context, ownerID int64) ([]models.Project, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, name, description, owner_id, created_at, updated_at, created_by
+		SELECT id, name, description, owner_id
 		FROM projects
 		WHERE owner_id = $1 AND deleted_at IS NULL
 		ORDER BY id
@@ -61,7 +61,7 @@ func (r *ProjectRepository) ListByOwner(ctx context.Context, ownerID int64) ([]m
 	var projects []models.Project
 	for rows.Next() {
 		var project models.Project
-		if err := rows.Scan(&project.ID, &project.Name, &project.Description, &project.OwnerID, &project.CreatedAt, &project.UpdatedAt, &project.CreatedBy); err != nil {
+		if err := rows.Scan(&project.ID, &project.Name, &project.Description, &project.OwnerID); err != nil {
 			return nil, err
 		}
 		projects = append(projects, project)
@@ -85,4 +85,13 @@ func (r *ProjectRepository) OwnedBy(ctx context.Context, projectID int64, ownerI
 		)
 	`, projectID, ownerID).Scan(&exists)
 	return exists, err
+}
+
+func (r *ProjectRepository) Delete(ctx context.Context, id int64) error {
+	_, err := r.db.ExecContext(ctx, `
+		UPDATE projects
+		SET deleted_at = NOW()
+		WHERE id = $1 AND deleted_at IS NULL
+	`, id)
+	return err
 }

@@ -13,6 +13,7 @@ type ProjectStore interface {
 	ListByOwner(ctx context.Context, ownerID int64) ([]models.Project, error)
 	Exists(ctx context.Context, id int64) (bool, error)
 	OwnedBy(ctx context.Context, projectID int64, ownerID int64) (bool, error)
+	Delete(ctx context.Context, id int64) error
 }
 
 type ProjectService struct {
@@ -54,4 +55,23 @@ func (s *ProjectService) List(ctx context.Context) ([]models.Project, error) {
 
 func (s *ProjectService) ListByOwner(ctx context.Context, ownerID int64) ([]models.Project, error) {
 	return s.projects.ListByOwner(ctx, ownerID)
+}
+
+func (s *ProjectService) Delete(ctx context.Context, projectID int64, userID int64) error {
+	owned, err := s.projects.OwnedBy(ctx, projectID, userID)
+	if err != nil {
+		s.logger.Error("failed to check project ownership", "error", err)
+		return err
+	}
+	if !owned {
+		err := fmt.Errorf("you can only delete your own projects")
+		s.logger.Error("cannot delete project", "project_id", projectID, "user_id", userID)
+		return err
+	}
+	if err := s.projects.Delete(ctx, projectID); err != nil {
+		s.logger.Error("failed to delete project", "error", err)
+		return err
+	}
+	s.logger.Info("project deleted", "project_id", projectID)
+	return nil
 }

@@ -79,10 +79,6 @@ func (r *TaskRepository) List(ctx context.Context, filter models.TaskFilter) ([]
 		args = append(args, filter.Priority)
 		query += ` AND priority = $` + intPlaceholder(len(args))
 	}
-	if filter.AssigneeID > 0 {
-		args = append(args, filter.AssigneeID)
-		query += ` AND assignee_id = $` + intPlaceholder(len(args))
-	}
 	query += ` ORDER BY id`
 
 	rows, err := r.db.QueryContext(ctx, query, args...)
@@ -172,7 +168,7 @@ func (r *TaskRepository) UpdateStatus(ctx context.Context, task models.Task, his
 
 func (r *TaskRepository) listTags(ctx context.Context, taskID int64) ([]models.Tag, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT tags.id, tags.name, tags.created_at, tags.updated_at
+		SELECT tags.id, tags.name
 		FROM tags
 		JOIN task_tags ON task_tags.tag_id = tags.id
 		WHERE task_tags.task_id = $1
@@ -186,12 +182,22 @@ func (r *TaskRepository) listTags(ctx context.Context, taskID int64) ([]models.T
 	var tags []models.Tag
 	for rows.Next() {
 		var tag models.Tag
-		if err := rows.Scan(&tag.ID, &tag.Name, &tag.CreatedAt, &tag.UpdatedAt); err != nil {
+		if err := rows.Scan(&tag.ID, &tag.Name); err != nil {
 			return nil, err
 		}
 		tags = append(tags, tag)
 	}
 	return tags, rows.Err()
+}
+
+// Delete выполняет мягкое удаление задачи (устанавливает deleted_at)
+func (r *TaskRepository) Delete(ctx context.Context, id int64) error {
+	_, err := r.db.ExecContext(ctx, `
+		UPDATE tasks
+		SET deleted_at = NOW()
+		WHERE id = $1 AND deleted_at IS NULL
+	`, id)
+	return err
 }
 
 func intPlaceholder(value int) string {

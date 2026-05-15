@@ -13,6 +13,17 @@ type TaskStore interface {
 	List(ctx context.Context, filter models.TaskFilter) ([]models.Task, error)
 	FindByID(ctx context.Context, id int64) (models.Task, error)
 	UpdateStatus(ctx context.Context, task models.Task, history models.TaskHistory) error
+	Delete(ctx context.Context, id int64) error
+}
+
+// TaskServiceInterface — интерфейс для работы с задачами
+// Паттерн Facade — скрывает сложность взаимодействия с хранилищами
+type TaskServiceInterface interface {
+	Create(ctx context.Context, task models.Task) (models.Task, error)
+	List(ctx context.Context, filter models.TaskFilter) ([]models.Task, error)
+	ChangeStatus(ctx context.Context, taskID int64, status models.Status) error
+	ChangeStatusForAssignee(ctx context.Context, taskID int64, assigneeID int64, status models.Status) error
+	Delete(ctx context.Context, taskID int64, userID int64) error
 }
 
 type TaskFacade struct {
@@ -22,6 +33,9 @@ type TaskFacade struct {
 	logger   AppLogger
 	now      func() time.Time
 }
+
+// Проверка, что TaskFacade реализует интерфейс TaskServiceInterface
+var _ TaskServiceInterface = (*TaskFacade)(nil)
 
 func NewTaskFacade(tasks TaskStore, projects ProjectStore, users UserStore, logger AppLogger) *TaskFacade {
 	return &TaskFacade{
@@ -129,5 +143,34 @@ func (f *TaskFacade) ChangeStatusForAssignee(ctx context.Context, taskID int64, 
 		return err
 	}
 	f.logger.Info("task status changed", "task_id", task.ID, "status", status)
+	return nil
+}
+
+// Delete выполняет мягкое удаление задачи
+func (f *TaskFacade) Delete(ctx context.Context, taskID int64, userID int64) error {
+	task, err := f.tasks.FindByID(ctx, taskID)
+	if err != nil {
+		f.logger.Error("failed to find task for delete", "error", err)
+		return err
+	}
+
+	// Проверяем, что задача принадлежит проекту пользователя
+	projectOwned, err := f.projects.OwnedBy(ctx, task.ProjectID, userID)
+	if err != nil {
+		f.logger.Error("failed to check project ownership", "error", err)
+		return err
+	}
+	if !projectOwned {
+		err := fmt.Errorf("you can only delete tasks from your own projects")
+		f.logger.Error("cannot delete task from another project", "task_id", taskID, "user_id", userID)
+		return err
+	}
+
+	if err := f.tasks.Delete(ctx, taskID); err != nil {
+		f.logger.Error("failed to delete task", "error", err)
+		return err
+	}
+
+	f.logger.Info("task deleted (soft delete)", "task_id", taskID)
 	return nil
 }

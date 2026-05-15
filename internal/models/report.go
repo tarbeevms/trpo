@@ -5,7 +5,6 @@ type ReportType string
 const (
 	ReportByStatus   ReportType = "status"
 	ReportByPriority ReportType = "priority"
-	ReportByAssignee ReportType = "assignee"
 )
 
 type Report struct {

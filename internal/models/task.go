@@ -35,17 +35,15 @@ type Task struct {
 	Deadline    time.Time
 	AssigneeID  int64
 	Tags        []Tag
-	History     []TaskHistory
 }
 
 type TaskFilter struct {
-	Status     Status
-	Priority   Priority
-	AssigneeID int64
+	Status   Status
+	Priority Priority
 }
 
 type Tag struct {
-	BaseEntity
+	ID   int64
 	Name string
 }
 
@@ -101,8 +99,24 @@ func (t *Task) ChangeStatus(newStatus Status, changedAt time.Time) (TaskHistory,
 		ChangedAt: changedAt,
 	}
 	t.Status = newStatus
-	t.History = append(t.History, history)
 	return history, nil
+}
+
+// GetTaskInfo возвращает информацию о задаче, используя методы встроенных структур
+// Демонстрирует множественное наследование и разрешение конфликтов методов
+func (t Task) GetTaskInfo() string {
+	// Использование уникальных методов - работают напрямую
+	creatorID := t.GetCreatedBy() // метод из AuditInfo
+	isDeleted := t.IsDeleted()    // метод из SoftDelete
+	createdAt := t.GetCreatedAt() // метод из BaseEntity
+
+	// Использование методов с одинаковым названием - требует явного указания
+	entityID := t.BaseEntity.GetID()          // ID задачи из BaseEntity
+	creatorIDFromGetID := t.AuditInfo.GetID() // ID создателя из AuditInfo
+	deleteID := t.SoftDelete.GetID()          // статус удаления из SoftDelete
+
+	return fmt.Sprintf("Task[id=%d, creator=%d, deleted=%v, created=%v, entityID=%d, creatorID=%d, deleteStatus=%d]",
+		t.ID, creatorID, isDeleted, createdAt, entityID, creatorIDFromGetID, deleteID)
 }
 
 func (s Status) IsValid() bool {
