@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TaskFlow</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: Georgia, "Times New Roman", serif;
+      color: #202124;
+      background: #f4f6f0;
+    }
+    main {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+    h1, h2 {
+      margin: 0 0 12px;
+    }
+    section {
+      margin: 18px 0;
+      padding: 16px;
+      background: #ffffff;
+      border: 1px solid #d9dfd0;
+      border-radius: 6px;
+    }
+    form {
+      display: grid;
+      gap: 8px;
+      margin: 8px 0;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 12px;
+    }
+    input, select, textarea, button {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 8px;
+      border: 1px solid #aeb8a4;
+      border-radius: 4px;
+      font: inherit;
+    }
+    button {
+      cursor: pointer;
+      color: #ffffff;
+      background: #315c4a;
+      border-color: #315c4a;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 8px;
+    }
+    th, td {
+      padding: 8px;
+      border-bottom: 1px solid #d9dfd0;
+      text-align: left;
+      vertical-align: top;
+    }
+    .notice {
+      padding: 10px;
+      border-radius: 4px;
+      background: #e7f1e6;
+    }
+    .error {
+      padding: 10px;
+      border-radius: 4px;
+      color: #721c24;
+      background: #f8d7da;
+    }
+  </style>
+</head>
+<body>
+<main>
+  <h1>TaskFlow</h1>
+
+  {{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+  {{if .Message}}<p class="notice">{{.Message}}</p>{{end}}
+
+  {{if not .Authenticated}}
+  <section>
+    <h2>Регистрация</h2>
+    <p>Создает нового пользователя и сразу открывает его персональную страницу. Логин используется для входа, пароль должен быть от 6 до 72 символов.</p>
+    <form method="post" action="/register">
+      <div class="grid">
+        <input name="login" placeholder="Логин" required minlength="3" maxlength="50">
+        <input type="password" name="password" placeholder="Пароль" required minlength="6" maxlength="72">
+      </div>
+      <button type="submit">Зарегистрироваться</button>
+    </form>
+  </section>
+
+  <section>
+    <h2>Вход</h2>
+    <p>Выполняет вход по логину и паролю. После успешного входа сервер выдает JWT и сохраняет его в httpOnly cookie.</p>
+    <form method="post" action="/login">
+      <div class="grid">
+        <input name="login" placeholder="Логин" required minlength="3" maxlength="50">
+        <input type="password" name="password" placeholder="Пароль" required minlength="6" maxlength="72">
+      </div>
+      <button type="submit">Войти</button>
+    </form>
+  </section>
+  {{else}}
+
+  <section>
+    <h2>Моя страница</h2>
+    <p>Вы вошли как {{.CurrentUser.Login}}. Все проекты и задачи на этой странице относятся к текущему пользователю.</p>
+    <form method="post" action="/logout">
+      <button type="submit">Выйти</button>
+    </form>
+  </section>
+
+  <section>
+    <h2>Проект</h2>
+    <p>Проект группирует задачи. Поле "Название проекта" должно содержать от 3 до 80 символов, описание можно оставить пустым.</p>
+    <form method="post" action="/projects">
+      <div class="grid">
+        <input name="name" placeholder="Название проекта" required minlength="3" maxlength="80">
+        <input name="description" placeholder="Описание" maxlength="500">
+      </div>
+      <button type="submit">Создать проект</button>
+    </form>
+  </section>
+
+  <section>
+    <h2>Задача</h2>
+    <p>Задача создается в выбранном проекте и автоматически назначается текущему пользователю. Дедлайн должен быть сегодня или позже, теги вводятся через запятую.</p>
+    <form method="post" action="/tasks">
+      <div class="grid">
+        <select name="project_id" required>
+          {{range .Projects}}<option value="{{.ID}}">{{.Name}} (#{{.ID}})</option>{{end}}
+        </select>
+        <input name="title" placeholder="Название задачи" required minlength="3" maxlength="100">
+        <select name="priority" required>
+          <option value="low">low</option>
+          <option value="medium">medium</option>
+          <option value="high">high</option>
+          <option value="critical">critical</option>
+        </select>
+        <input type="date" name="deadline" required>
+        <input name="tags" placeholder="Теги через запятую">
+      </div>
+      <textarea name="description" placeholder="Описание" maxlength="1000"></textarea>
+      <button type="submit">Создать задачу</button>
+    </form>
+  </section>
+
+  <section>
+    <h2>Фильтр задач</h2>
+    <p>Фильтр показывает только ваши задачи с выбранным статусом и приоритетом.</p>
+    <form method="get" action="/me">
+      <div class="grid">
+        <select name="status">
+          <option value="">любой статус</option>
+          <option value="new">new</option>
+          <option value="in_progress">in_progress</option>
+          <option value="done">done</option>
+          <option value="cancelled">cancelled</option>
+        </select>
+        <select name="priority">
+          <option value="">любой приоритет</option>
+          <option value="low">low</option>
+          <option value="medium">medium</option>
+          <option value="high">high</option>
+          <option value="critical">critical</option>
+        </select>
+      </div>
+      <button type="submit">Показать задачи</button>
+    </form>
+  </section>
+
+  <section>
+    <h2>Список задач</h2>
+    <p>В таблице отображаются задачи текущего пользователя. ID нужен для смены статуса.</p>
+    <table>
+      <thead>
+      <tr>
+        <th>ID</th>
+        <th>Название</th>
+        <th>Статус</th>
+        <th>Приоритет</th>
+        <th>Дедлайн</th>
+        <th>Исполнитель</th>
+        <th>Теги</th>
+      </tr>
+      </thead>
+      <tbody>
+      {{range .Tasks}}
+      <tr>
+        <td>{{.ID}}</td>
+        <td>{{.Title}}</td>
+        <td>{{.Status}}</td>
+        <td>{{.Priority}}</td>
+        <td>{{date .Deadline}}</td>
+        <td>{{.AssigneeID}}</td>
+        <td>{{range .Tags}}{{.Name}} {{end}}</td>
+      </tr>
+      {{else}}
+      <tr><td colspan="7">Задач пока нет</td></tr>
+      {{end}}
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>Смена статуса</h2>
+    <p>Введите ID своей задачи и выберите новый статус. При изменении статуса создается запись в истории задачи.</p>
+    <form method="post" action="/tasks/status">
+      <div class="grid">
+        <input name="task_id" placeholder="ID задачи" required>
+        <select name="status" required>
+          <option value="new">new</option>
+          <option value="in_progress">in_progress</option>
+          <option value="done">done</option>
+          <option value="cancelled">cancelled</option>
+        </select>
+      </div>
+      <button type="submit">Изменить статус</button>
+    </form>
+  </section>
+
+  <section>
+    <h2>Отчет</h2>
+    <p>Отчет строится только по задачам текущего пользователя. Поле "Тип отчета" выбирает алгоритм подсчета: по статусам, по приоритетам или по исполнителям.</p>
+    <form method="get" action="/report">
+      <select name="report_type">
+        <option value="status">по статусам</option>
+        <option value="priority">по приоритетам</option>
+        <option value="assignee">по исполнителям</option>
+      </select>
+      <button type="submit">Построить отчет</button>
+    </form>
+    <table>
+      <thead>
+      <tr>
+        <th>Тип</th>
+        <th>Значение</th>
+        <th>Количество</th>
+      </tr>
+      </thead>
+      <tbody>
+      {{range .Report.Items}}
+      <tr>
+        <td>{{$.Report.Type}}</td>
+        <td>{{.Label}}</td>
+        <td>{{.Count}}</td>
+      </tr>
+      {{else}}
+      <tr><td colspan="3">Нет данных для отчета</td></tr>
+      {{end}}
+      </tbody>
+    </table>
+  </section>
+  {{end}}
+</main>
+</body>
+</html>
