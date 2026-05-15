@@ -21,6 +21,7 @@ func (s *Server) createProject(w http.ResponseWriter, r *http.Request) {
 		Name:        r.FormValue("name"),
 		Description: r.FormValue("description"),
 		OwnerID:     user.ID,
+		AuditInfo:   models.AuditInfo{CreatedBy: user.ID},
 	}
 	if _, err := s.projects.Create(contextWithRequest(r), project); err != nil {
 		redirectWithErrorTo(w, r, "/me", err)

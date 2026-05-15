@@ -23,15 +23,16 @@
 - **Проекты принадлежат пользователю**: каждый проект имеет владельца
 
 ### 2.3. Управление задачами
-- **Создание задачи**: название, описание, статус, приоритет, дедлайн, исполнитель, теги
-- **Просмотр задач**: таблица с задачами выбранного проекта
-- **Изменение статуса**: переход между статусами (new → in_progress → done/cancelled)
+- **Создание задачи**: название, описание, приоритет, дедлайн, теги; статус при создании автоматически становится `new`, исполнитель — текущий пользователь
+- **Просмотр задач**: таблица только с задачами текущего пользователя
+- **Изменение статуса**: смена статуса на одно из допустимых значений (`new`, `in_progress`, `done`, `cancelled`)
 - **Валидация данных**: проверка корректности вводимых данных
 
 ### 2.4. Экспорт отчётов
-- **Экспорт в JSON**: полный вывод задач в формате JSON
-- **Экспорт в XML**: полный вывод задач в формате XML
-- **Отображение на фронтенде**: JSON и XML отображаются на странице без скачивания
+- **Экспорт в HTML**: табличное отображение задач текущего пользователя
+- **Экспорт в JSON**: вывод задач текущего пользователя в формате JSON
+- **Экспорт в XML**: вывод задач текущего пользователя в формате XML
+- **Отображение на фронтенде**: HTML, JSON и XML отображаются на странице без скачивания
 
 ### 2.5. Теги
 - **Добавление тегов**: до 10 тегов на задачу
@@ -65,13 +66,13 @@
   "project_id": 1,
   "title": "Название задачи",
   "description": "Описание задачи",
-  "status": "new",
   "priority": "high",
   "deadline": "2026-06-01",
-  "assignee_id": 2,
   "tags": ["study", "urgent"]
 }
 ```
+
+`status` и `assignee_id` пользователь не вводит вручную: обработчик создает задачу со статусом `new`, а исполнителем назначает текущего авторизованного пользователя.
 
 ### 3.2. Выходные данные
 
@@ -117,16 +118,19 @@
 | Поле | Тип | Ограничение |
 |------|-----|-------------|
 | Логин пользователя | string | 3-50 символов, без пробелов, уникальный |
-| Пароль пользователя | string | Минимум 6 символов |
+| Пароль пользователя | string | 6-72 символа |
 | Название проекта | string | 3-80 символов |
 | Описание проекта | string | До 500 символов |
+| `project_id` задачи | integer | Обязателен, должен ссылаться на проект текущего пользователя |
 | Название задачи | string | 3-100 символов |
 | Описание задачи | string | До 1000 символов |
 | Статус задачи | enum | new, in_progress, done, cancelled |
 | Приоритет задачи | enum | low, medium, high, critical |
 | Дедлайн | date | Не ранее текущей даты |
+| Исполнитель задачи | integer | Автоматически текущий пользователь |
 | Теги | array | До 10 тегов на задачу |
 | Название тега | string | 2-30 символов |
+| Формат экспорта | enum | html, json, xml |
 
 ---
 
@@ -154,6 +158,7 @@ taskflow/
 │   │   └── *_test.go            # Unit-тесты для моделей
 │   ├── repository/
 │   │   ├── project.go           # Репозиторий проектов
+│   │   ├── report.go            # Заготовка репозитория отчётов
 │   │   ├── task.go              # Репозиторий задач
 │   │   └── user.go              # Репозиторий пользователей
 │   └── service/
@@ -202,7 +207,6 @@ type Task struct {
     Deadline    time.Time // экспортируемое поле
     AssigneeID  int64     // экспортируемое поле
     Tags        []Tag     // экспортируемое поле
-    History     []TaskHistory // экспортируемое поле
 }
 
 // Валидация — метод структуры, инкапсулирующий логику проверки
@@ -271,18 +275,22 @@ type TaskStore interface {
     List(ctx context.Context, filter models.TaskFilter) ([]models.Task, error)
     FindByID(ctx context.Context, id int64) (models.Task, error)
     UpdateStatus(ctx context.Context, task models.Task, history models.TaskHistory) error
+    Delete(ctx context.Context, id int64) error
 }
 ```
+
+`TaskFilter` в текущей реализации не является пользовательским фильтром по статусу или приоритету. Он используется как техническое ограничение доступа: `AssigneeID` задается из JWT текущего пользователя, чтобы список задач и экспорт не показывали чужие задачи.
 
 **ProjectStore — абстракция хранилища проектов:**
 ```go
 // internal/service/project.go
 type ProjectStore interface {
     Create(ctx context.Context, project *models.Project) error
-    List(ctx context.Context, userID int64) ([]models.Project, error)
-    FindByID(ctx context.Context, id int64) (models.Project, error)
+    List(ctx context.Context) ([]models.Project, error)
+    ListByOwner(ctx context.Context, ownerID int64) ([]models.Project, error)
     Exists(ctx context.Context, id int64) (bool, error)
-    OwnedBy(ctx context.Context, projectID, userID int64) (bool, error)
+    OwnedBy(ctx context.Context, projectID int64, ownerID int64) (bool, error)
+    Delete(ctx context.Context, id int64) error
 }
 ```
 
@@ -291,9 +299,11 @@ type ProjectStore interface {
 // internal/service/user.go
 type UserStore interface {
     Create(ctx context.Context, user *models.User) error
-    FindByLogin(ctx context.Context, login string) (models.User, error)
-    FindByID(ctx context.Context, id int64) (models.User, error)
+    List(ctx context.Context) ([]models.User, error)
     Exists(ctx context.Context, id int64) (bool, error)
+    LoginExists(ctx context.Context, login string) (bool, error)
+    FindByID(ctx context.Context, id int64) (models.User, error)
+    FindByLogin(ctx context.Context, login string) (models.User, error)
 }
 ```
 
@@ -379,19 +389,22 @@ func (e HTMLExporter) ExportTasks(tasks []models.Task) ([]byte, error) {
 ```go
 // internal/service/report.go
 type ReportService struct {
-    tasks    TaskStore
-    exporter *ExporterRegistry
+    tasks     TaskStore
+    logger    AppLogger
+    exporters *ExporterRegistry
 }
 
-func (s *ReportService) Export(ctx context.Context, userID int64, format string) ([]byte, error) {
-    tasks, err := s.tasks.List(ctx, models.TaskFilter{})
+func (s *ReportService) Build(ctx context.Context, filter models.TaskFilter, format string) ([]byte, error) {
+    tasks, err := s.tasks.List(ctx, filter)
     if err != nil {
         return nil, err
     }
-    exp := s.exporter.Get(format)
-    return exp.ExportTasks(tasks)
+    exporter := s.exporters.Get(format)
+    return exporter.ExportTasks(tasks)
 }
 ```
+
+HTTP-обработчик `/report` передает в `Build` фильтр `models.TaskFilter{AssigneeID: user.ID}`. Поэтому экспорт строится только по задачам текущего пользователя.
 
 ##### 2. Полиморфизм через интерфейсы хранилищ
 
@@ -459,8 +472,8 @@ type Task struct {
 Теперь `Task` имеет доступ к полям и методам `BaseEntity`:
 
 ```go
-task := Task{ID: 1, Title: "Test"}
-id := task.GetID()           // вызов унаследованного метода
+task := Task{BaseEntity: BaseEntity{ID: 1}, Title: "Test"}
+id := task.BaseEntity.GetID() // явный вызов метода встроенной структуры
 createdAt := task.CreatedAt  // доступ к унаследованному полю
 ```
 
@@ -536,7 +549,6 @@ type Task struct {
     Deadline     time.Time
     AssigneeID   int64
     Tags         []Tag
-    History      []TaskHistory
 }
 ```
 
@@ -550,8 +562,8 @@ type Task struct {
 
 **Как Go разрешает конфликты:**
 
-1. **Приоритет у встроенной структуры**: если вызвать `task.GetID()`, будет вызван метод первой встроенной структуры (BaseEntity)
-2. **Явное указание структуры**: для доступа к методам других встроенных структур нужно указать её явно
+1. Если несколько встроенных структур имеют метод с одинаковым именем на одном уровне, вызов `task.GetID()` будет неоднозначным и не скомпилируется.
+2. Для доступа к конфликтующим методам нужно явно указать встроенную структуру: `task.BaseEntity.GetID()`, `task.AuditInfo.GetID()`, `task.SoftDelete.GetID()`.
 
 Пример использования в методе `GetTaskInfo()`:
 
@@ -751,15 +763,24 @@ func (r *ExporterRegistry) Get(format string) ReportExporter {
 **Использование в сервисе:**
 
 ```go
-func (s *ReportService) Export(ctx context.Context, userID int64, format string) ([]byte, error) {
-    tasks, err := s.tasks.List(ctx, models.TaskFilter{})
+func (s *ReportService) Build(ctx context.Context, filter models.TaskFilter, format string) ([]byte, error) {
+    tasks, err := s.tasks.List(ctx, filter)
     if err != nil {
         return nil, err
     }
-    exporter := s.exporter.Get(format) // выбор стратегии
+    exporter := s.exporters.Get(format) // выбор стратегии
     return exporter.ExportTasks(tasks)
 }
 ```
+
+В обработчике отчета фильтр формируется из текущего пользователя:
+
+```go
+filter := models.TaskFilter{AssigneeID: user.ID}
+exported, err := s.reports.Build(r.Context(), filter, format)
+```
+
+Это важно для безопасности: пользователь получает экспорт только своих задач.
 
 **Преимущества использования Strategy:**
 
@@ -783,7 +804,8 @@ func (s *ReportService) Export(ctx context.Context, userID int64, format string)
 // HTTP-обработчик использует Facade
 handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
     format := r.URL.Query().Get("format")
-    data, err := reportService.Export(r.Context(), userID, format)
+    filter := models.TaskFilter{AssigneeID: userID}
+    data, err := reportService.Build(r.Context(), filter, format)
     // ...
 })
 ```
@@ -944,10 +966,9 @@ func (r *TaskRepository) Create(ctx context.Context, task *models.Task) error {
 func (r *TaskRepository) List(ctx context.Context, filter models.TaskFilter) ([]models.Task, error) {
     // реализация
 }
-
-// TaskRepository реализует интерфейс TaskStore
-var _ TaskStore = (*TaskRepository)(nil)
 ```
+
+`TaskRepository` реализует `TaskStore` неявно: в Go структура считается реализацией интерфейса, если у нее есть все методы интерфейса.
 
 ---
 
@@ -1033,9 +1054,9 @@ func TestTaskValidateBoundaryFields(t *testing.T) {
 | `internal/models/task_test.go` | Тесты валидации задач, изменения статуса |
 | `internal/models/project_test.go` | Тесты валидации проектов |
 | `internal/models/user_test.go` | Тесты валидации пользователей |
-| `internal/models/report_test.go` | Тесты экспорта отчётов |
-| `internal/service/task_test.go` | Тесты бизнес-логики задач |
-| `internal/service/report_test.go` | Тесты сервиса отчётов |
+| `internal/models/report_test.go` | Тесты нормализации типа отчёта |
+| `internal/service/task_test.go` | Тесты бизнес-логики задач и фасада |
+| `internal/service/report_test.go` | Тесты экспортёров, выбора стратегии экспорта и передачи `AssigneeID` в `TaskFilter` |
 
 ### 9.3. Запуск тестов
 
@@ -1127,8 +1148,8 @@ CREATE TABLE task_history (
 # Запуск через docker-compose
 docker-compose up -d postgres
 
-# Применение миграций
-docker-compose exec postgres psql -U postgres -d taskflow -f /migrations/001_init.sql
+# Миграция копируется Dockerfile в /docker-entrypoint-initdb.d
+# и применяется автоматически при первом создании volume.
 ```
 
 ---
@@ -1144,14 +1165,14 @@ docker-compose exec postgres psql -U postgres -d taskflow -f /migrations/001_ini
 1. **Регистрация** — форма создания нового пользователя
 2. **Вход** — форма аутентификации
 3. **Проекты** — создание и просмотр проектов
-4. **Задачи** — создание и просмотр задач в проекте
+4. **Задачи** — создание и просмотр задач текущего пользователя
 5. **Статусы** — изменение статуса задачи
 6. **Отчёты** — экспорт задач в JSON/XML/HTML
 
 ### 11.2. Функциональность фронтенда
 
 - Асинхронные запросы через fetch API
-- Отображение JSON и XML без скачивания
+- Отображение HTML, JSON и XML без скачивания
 - Валидация форм на стороне клиента
 - Адаптивный дизайн
 
@@ -1164,11 +1185,10 @@ docker-compose exec postgres psql -U postgres -d taskflow -f /migrations/001_ini
 Логирование реализовано через интерфейс `AppLogger`:
 
 ```go
-// internal/service/task.go
+// internal/service/user.go
 type AppLogger interface {
     Info(msg string, args ...any)
     Error(msg string, args ...any)
-    Debug(msg string, args ...any)
 }
 ```
 
@@ -1199,7 +1219,7 @@ func (f *TaskFacade) Create(ctx context.Context, task models.Task) (models.Task,
 | Абстракция | ✅ Интерфейсы TaskStore, ProjectStore, UserStore, ReportExporter |
 | Полиморфизм | ✅ Реализация через интерфейсы |
 | Наследование одиночное | ✅ BaseEntity → Task, Project, User |
-| Наследование множественное | ✅ Task встраивает BaseEntity, AuditInfo, SoftDelete |
+| Наследование множественное | ✅ User, Project и Task встраивают несколько структур |
 | Конфликт методов | ✅ GetID() в нескольких структурах с разрешением |
 | Связи объектов | ✅ Ассоциация, агрегация, композиция, зависимость |
 | Паттерн Facade | ✅ TaskFacade |

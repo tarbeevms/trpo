@@ -4,6 +4,7 @@ CREATE TABLE IF NOT EXISTS users (
     password_hash TEXT NOT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    created_by BIGINT NOT NULL DEFAULT 0,
     deleted_at TIMESTAMP NULL
 );
 
@@ -12,6 +13,9 @@ CREATE TABLE IF NOT EXISTS projects (
     name VARCHAR(80) NOT NULL,
     description VARCHAR(500) NOT NULL DEFAULT '',
     owner_id BIGINT NOT NULL REFERENCES users(id),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    created_by BIGINT NOT NULL DEFAULT 0,
     deleted_at TIMESTAMP NULL
 );
 
@@ -26,12 +30,15 @@ CREATE TABLE IF NOT EXISTS tasks (
     assignee_id BIGINT NOT NULL REFERENCES users(id),
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    created_by BIGINT NOT NULL DEFAULT 0,
     deleted_at TIMESTAMP NULL
 );
 
 CREATE TABLE IF NOT EXISTS tags (
     id BIGSERIAL PRIMARY KEY,
-    name VARCHAR(30) NOT NULL UNIQUE
+    name VARCHAR(30) NOT NULL UNIQUE,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS task_tags (

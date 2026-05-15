@@ -29,7 +29,7 @@ func (s *Server) report(w http.ResponseWriter, r *http.Request) {
 		format = "html"
 	}
 
-	filter := models.TaskFilter{}
+	filter := models.TaskFilter{AssigneeID: user.ID}
 
 	exported, err := s.reports.Build(r.Context(), filter, format)
 	if err != nil {

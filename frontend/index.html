@@ -299,7 +299,10 @@
     });
     
     function escapeHtml(text) {
-      return text.replace(/&/g, '&').replace(/</g, '<').replace(/>/g, '>');
+      return text
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
     }
   </script>
   {{end}}

@@ -3,7 +3,8 @@ package models
 import "fmt"
 
 type Project struct {
-	ID int64
+	BaseEntity
+	AuditInfo
 	SoftDelete
 	Name        string
 	Description string

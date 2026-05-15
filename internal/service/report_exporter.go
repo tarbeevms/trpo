@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
+	"html"
 
 	"taskflow/internal/models"
 )
@@ -91,18 +92,25 @@ func (e HTMLExporter) ExportTasks(tasks []models.Task) ([]byte, error) {
 		return []byte("<p>Нет задач для отображения</p>"), nil
 	}
 
-	html := "<table><thead><tr><th>ID</th><th>Название</th><th>Описание</th><th>Статус</th><th>Приоритет</th><th>Дедлайн</th><th>Теги</th></tr></thead><tbody>"
+	table := "<table><thead><tr><th>ID</th><th>Название</th><th>Описание</th><th>Статус</th><th>Приоритет</th><th>Дедлайн</th><th>Теги</th></tr></thead><tbody>"
 	for _, task := range tasks {
 		tags := ""
 		for _, tag := range task.Tags {
-			tags += tag.Name + " "
+			tags += html.EscapeString(tag.Name) + " "
 		}
-		html += fmt.Sprintf("<tr><td>%d</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>",
-			task.ID, task.Title, task.Description, task.Status, task.Priority, task.Deadline.Format("2006-01-02"), tags)
+		table += fmt.Sprintf("<tr><td>%d</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>",
+			task.ID,
+			html.EscapeString(task.Title),
+			html.EscapeString(task.Description),
+			html.EscapeString(string(task.Status)),
+			html.EscapeString(string(task.Priority)),
+			task.Deadline.Format("2006-01-02"),
+			tags,
+		)
 	}
-	html += "</tbody></table>"
+	table += "</tbody></table>"
 
-	return []byte(html), nil
+	return []byte(table), nil
 }
 
 // ExporterRegistry - реестр доступных экспортёров

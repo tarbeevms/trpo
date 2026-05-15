@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"strconv"
-	"time"
 
 	"taskflow/internal/models"
 )
@@ -53,14 +52,6 @@ func (r *TaskRepository) Create(ctx context.Context, task *models.Task) error {
 		}
 	}
 
-	_, err = tx.ExecContext(ctx, `
-		INSERT INTO task_history (task_id, old_status, new_status, changed_at)
-		VALUES ($1, $2, $3, $4)
-	`, task.ID, models.StatusNew, task.Status, time.Now())
-	if err != nil {
-		return err
-	}
-
 	return tx.Commit()
 }
 
@@ -71,13 +62,9 @@ func (r *TaskRepository) List(ctx context.Context, filter models.TaskFilter) ([]
 		WHERE deleted_at IS NULL
 	`
 	var args []any
-	if filter.Status != "" {
-		args = append(args, filter.Status)
-		query += ` AND status = $` + intPlaceholder(len(args))
-	}
-	if filter.Priority != "" {
-		args = append(args, filter.Priority)
-		query += ` AND priority = $` + intPlaceholder(len(args))
+	if filter.AssigneeID > 0 {
+		args = append(args, filter.AssigneeID)
+		query += ` AND assignee_id = $` + intPlaceholder(len(args))
 	}
 	query += ` ORDER BY id`
 

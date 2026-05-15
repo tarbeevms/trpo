@@ -38,8 +38,7 @@ type Task struct {
 }
 
 type TaskFilter struct {
-	Status   Status
-	Priority Priority
+	AssigneeID int64
 }
 
 type Tag struct {

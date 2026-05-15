@@ -27,14 +27,10 @@ type pageData struct {
 	Users          []models.User
 	Projects       []models.Project
 	Tasks          []models.Task
-	Report         models.Report
 	ExportedReport string // Отчёт, сгенерированный экспортёром
 	ExportFormat   string // Формат экспорта (html, json, xml)
 	Error          string
 	Message        string
-	FilterStatus   string
-	FilterPriority string
-	ReportType     models.ReportType
 	Authenticated  bool
 	CurrentUser    models.User
 }
@@ -85,13 +81,10 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.render(w, r, pageData{
-		Error:          r.URL.Query().Get("error"),
-		Message:        r.URL.Query().Get("message"),
-		FilterStatus:   r.URL.Query().Get("status"),
-		FilterPriority: r.URL.Query().Get("priority"),
-		ReportType:     models.ReportType(r.URL.Query().Get("report_type")),
-		Authenticated:  true,
-		CurrentUser:    user,
+		Error:         r.URL.Query().Get("error"),
+		Message:       r.URL.Query().Get("message"),
+		Authenticated: true,
+		CurrentUser:   user,
 	})
 }
 
@@ -179,16 +172,9 @@ func (s *Server) deleteTask(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) render(w http.ResponseWriter, r *http.Request, data pageData) {
-	filter := models.TaskFilter{
-		Status:   models.Status(data.FilterStatus),
-		Priority: models.Priority(data.FilterPriority),
-	}
-	if data.ReportType == "" {
-		data.ReportType = models.ReportByStatus
-	}
-
 	ctx := r.Context()
 	if data.Authenticated {
+		filter := models.TaskFilter{AssigneeID: data.CurrentUser.ID}
 		projects, err := s.projects.ListByOwner(ctx, data.CurrentUser.ID)
 		if err != nil {
 			data.Error = err.Error()
@@ -199,7 +185,7 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, data pageData) {
 		}
 		// Генерируем HTML-отчёт только если он ещё не передан (например, из /report)
 		if data.ExportedReport == "" {
-			exported, err := s.reports.Build(ctx, models.TaskFilter{}, "html")
+			exported, err := s.reports.Build(ctx, filter, "html")
 			if err != nil {
 				data.Error = err.Error()
 			}

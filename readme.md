@@ -1,531 +1,1236 @@
-# TaskFlow Documentation
+# TaskFlow — система управления задачами
 
 ## 1. Постановка задачи
 
-`TaskFlow` - простое веб-приложение на Go для управления личными задачами и проектами.
+**TaskFlow** — это веб-приложение для управления задачами, разработанное в соответствии с принципами объектно-ориентированного программирования. Приложение позволяет пользователям создавать проекты, управлять задачами в рамках проектов, отслеживать статус и приоритет задач, а также экспортировать данные в различных форматах.
 
-Приложение позволяет регистрироваться, входить через JWT, создавать проекты и задачи на персональной странице пользователя, менять статус задачи, просматривать список своих задач и проектов, строить отчёты и экспортировать их в разных форматах. Данные сохраняются в PostgreSQL, который поднимается через Docker.
+### Цель проекта
 
-Проект реализован строго под требования КМ-4 и КМ-5: есть ООП-модель, не менее 8 структур, связи между объектами, загрузка данных из БД, 2 паттерна проектирования, логирование, unit-тесты и описание реализации.
+Разработать полнофункциональное приложение, демонстрирующее все принципы ООП (инкапсуляция, абстракция, полиморфизм, наследование), использование паттернов проектирования, работу с базой данных PostgreSQL, логирование и unit-тестирование.
+
+---
 
 ## 2. Функции приложения
 
-- регистрация пользователя;
-- вход пользователя через JWT;
-- выход пользователя;
-- персональная страница пользователя `/me`;
-- создание проекта;
-- просмотр списка проектов (название + описание);
-- создание задачи;
-- изменение статуса задачи;
-- просмотр списка задач;
-- построение отчёта по статусам или приоритетам;
-- экспорт отчёта в форматах HTML, JSON, XML;
-- логирование основных операций;
-- сохранение и загрузка данных из PostgreSQL.
+### 2.1. Аутентификация и авторизация
+- **Регистрация пользователей**: создание учётной записи с уникальным логином
+- **Вход в систему**: аутентификация пользователя с использованием JWT-токенов
+- **Защищённые маршруты**: доступ к функциям только для авторизованных пользователей
+
+### 2.2. Управление проектами
+- **Создание проекта**: название (3-80 символов), описание (до 500 символов)
+- **Просмотр списка проектов**: отображение всех проектов текущего пользователя
+- **Проекты принадлежат пользователю**: каждый проект имеет владельца
+
+### 2.3. Управление задачами
+- **Создание задачи**: название, описание, приоритет, дедлайн, теги; статус при создании автоматически становится `new`, исполнитель — текущий пользователь
+- **Просмотр задач**: таблица только с задачами текущего пользователя
+- **Изменение статуса**: смена статуса на одно из допустимых значений (`new`, `in_progress`, `done`, `cancelled`)
+- **Валидация данных**: проверка корректности вводимых данных
+
+### 2.4. Экспорт отчётов
+- **Экспорт в HTML**: табличное отображение задач текущего пользователя
+- **Экспорт в JSON**: вывод задач текущего пользователя в формате JSON
+- **Экспорт в XML**: вывод задач текущего пользователя в формате XML
+- **Отображение на фронтенде**: HTML, JSON и XML отображаются на странице без скачивания
+
+### 2.5. Теги
+- **Добавление тегов**: до 10 тегов на задачу
+- **Валидация тегов**: название тега 2-30 символов
+
+---
 
 ## 3. Формат входных и выходных данных
 
-Пользователь работает с приложением через простой HTML-интерфейс [`frontend/index.html`](frontend/index.html).
+### 3.1. Входные данные
 
-Входные данные передаются через HTML-формы:
+#### Регистрация пользователя
+```json
+{
+  "login": "user123",
+  "password": "securepass"
+}
+```
 
-- регистрация: `login`, `password`;
-- вход: `login`, `password`;
-- проект: `name`, `description`;
-- задача: `project_id`, `title`, `description`, `priority`, `deadline`, `tags`;
-- смена статуса: `task_id`, `status`;
-- отчёт: `report_type`, `format`.
+#### Создание проекта
+```json
+{
+  "name": "Мой проект",
+  "description": "Описание проекта"
+}
+```
 
-`report_type` определяет алгоритм построения отчёта:
+#### Создание задачи
+```json
+{
+  "project_id": 1,
+  "title": "Название задачи",
+  "description": "Описание задачи",
+  "priority": "high",
+  "deadline": "2026-06-01",
+  "tags": ["study", "urgent"]
+}
+```
 
-- `status` - отчёт считает задачи по статусам: `new`, `in_progress`, `done`, `cancelled`;
-- `priority` - отчёт считает задачи по приоритетам: `low`, `medium`, `high`, `critical`.
+`status` и `assignee_id` пользователь не вводит вручную: обработчик создает задачу со статусом `new`, а исполнителем назначает текущего авторизованного пользователя.
 
-`format` определяет формат экспорта:
+### 3.2. Выходные данные
 
-- `html` - отобразить на странице;
-- `json` - скачать файл JSON;
-- `xml` - скачать файл XML.
+#### Список задач (JSON)
+```json
+[
+  {
+    "ID": 1,
+    "ProjectID": 1,
+    "Title": "Название задачи",
+    "Description": "Описание",
+    "Status": "new",
+    "Priority": "high",
+    "Deadline": "2026-06-01T00:00:00Z",
+    "Tags": [{"ID": 1, "Name": "study"}]
+  }
+]
+```
 
-На уровне кода эти значения описаны отдельным доменным типом [`ReportType`](internal/models/report.go#L3-L9), а не случайными строками.
+#### Список задач (XML)
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<tasks>
+  <task>
+    <id>1</id>
+    <project_id>1</project_id>
+    <title>Название задачи</title>
+    <description>Описание</description>
+    <status>new</status>
+    <priority>high</priority>
+    <deadline>2026-06-01</deadline>
+    <tags>
+      <tag>study</tag>
+    </tags>
+  </task>
+</tasks>
+```
 
-Выходные данные отображаются на HTML-странице:
-
-- персональная страница текущего пользователя;
-- список проектов текущего пользователя (название + описание);
-- список задач текущего пользователя;
-- сообщение об успешной операции;
-- сообщение об ошибке;
-- отчёт по задачам в выбранном формате.
+---
 
 ## 4. Ограничения на данные
 
-`User`:
+| Поле | Тип | Ограничение |
+|------|-----|-------------|
+| Логин пользователя | string | 3-50 символов, без пробелов, уникальный |
+| Пароль пользователя | string | Минимум 6 символов |
+| Название проекта | string | 3-80 символов |
+| Описание проекта | string | До 500 символов |
+| Название задачи | string | 3-100 символов |
+| Описание задачи | string | До 1000 символов |
+| Статус задачи | enum | new, in_progress, done, cancelled |
+| Приоритет задачи | enum | low, medium, high, critical |
+| Дедлайн | date | Не ранее текущей даты |
+| Теги | array | До 10 тегов на задачу |
+| Название тега | string | 2-30 символов |
 
-- `login` - обязательный, уникальный, от 3 до 50 символов, без пробелов, проверяется в [`User.Validate`](internal/models/user.go#L16-L24) и [`UserService.Create`](internal/service/user.go#L38-L59);
-- `password` - от 6 до 72 символов, проверяется в [`validatePassword`](internal/service/user.go#L99-L104);
-- `password_hash` - хранится в БД вместо открытого пароля, формируется в [`hashPassword`](internal/service/user.go#L106-L113).
-
-`Project`:
-
-- `name` - от 3 до 80 символов, проверяется в [`Project.Validate`](internal/models/project.go#L15-L26);
-- `description` - до 500 символов, проверяется в [`Project.Validate`](internal/models/project.go#L15-L26);
-- `owner_id` - обязательный, должен ссылаться на существующего пользователя, проверяется в [`ProjectService.Create`](internal/service/project.go#L26-L47).
-
-`Task`:
-
-- `title` - от 3 до 100 символов, проверяется в [`Task.Validate`](internal/models/task.go#L59-L90);
-- `description` - до 1000 символов, проверяется в [`Task.Validate`](internal/models/task.go#L59-L90);
-- `status` - только `new`, `in_progress`, `done`, `cancelled`, проверяется в [`Status.IsValid`](internal/models/task.go#L107-L109);
-- `priority` - только `low`, `medium`, `high`, `critical`, проверяется в [`Priority.IsValid`](internal/models/task.go#L111-L113);
-- `deadline` - не раньше текущей даты, проверяется в [`Task.Validate`](internal/models/task.go#L75-L77);
-- `project_id` - обязательный, должен ссылаться на существующий проект текущего пользователя, проверяется в [`TaskFacade.Create`](internal/service/task.go#L40-L86);
-- `assignee_id` - обязательный, должен ссылаться на существующего пользователя, проверяется в [`TaskFacade.Create`](internal/service/task.go#L40-L86);
-- `tags` - не больше 10 тегов, проверяется в [`Task.Validate`](internal/models/task.go#L81-L88).
-
-`Tag`:
-
-- `name` - от 2 до 30 символов, проверяется в [`Tag.Validate`](internal/models/task.go#L115-L117).
-
-`Report`:
-
-- `report_type` - только `status`, `priority`, `assignee`, значения описаны в [`ReportType`](internal/models/report.go#L3-L9);
-- пустой `report_type` автоматически превращается в `status` через [`ReportType.Normalize`](internal/models/report.go#L21-L26).
+---
 
 ## 5. Структура проекта
 
-- [`cmd/taskflow/main.go`](cmd/taskflow/main.go) - точка входа приложения;
-- [`build/Dockerfile`](build/Dockerfile) - Docker-файл PostgreSQL;
-- [`docker-compose.yml`](docker-compose.yml) - запуск PostgreSQL;
-- [`frontend/index.html`](frontend/index.html) - простой веб-интерфейс;
-- [`internal/app`](internal/app) - HTTP-обработчики;
-- [`internal/models`](internal/models) - модели предметной области;
-- [`internal/service`](internal/service) - бизнес-логика, фасад и стратегии;
-- [`internal/repository`](internal/repository) - методы работы с PostgreSQL;
-- [`pkg/auth`](pkg/auth) - генерация и проверка JWT;
-- [`pkg/logger`](pkg/logger) - логирование;
-- [`migrations/001_init.sql`](migrations/001_init.sql) - создание таблиц БД;
-- [`readme.md`](readme.md) - документация.
-
-## 6. Структуры и методы
-
-В Go нет классов в классическом смысле. В этом проекте роль классов выполняют структуры, методы структур и интерфейсы.
-
-### 6.1. Модели предметной области
-
-| Структура или тип | Где реализовано | За что отвечает | Методы |
-|---|---|---|---|
-| `BaseEntity` | [`common.go`](internal/models/common.go#L9-L13) | Общие поля сущностей: `ID`, `CreatedAt`, `UpdatedAt`. Используется для простого наследования через embedding. | Методов нет |
-| `AuditInfo` | [`common.go`](internal/models/common.go#L15-L17) | Информация об авторе создания записи: `CreatedBy`. Используется как часть множественного наследования через embedding. | Методов нет |
-| `SoftDelete` | [`common.go`](internal/models/common.go#L19-L21) | Поле мягкого удаления `DeletedAt`. Используется как часть множественного наследования через embedding. | Методов нет |
-| `User` | [`user.go`](internal/models/user.go#L8-L14) | Пользователь системы. Может быть владельцем проекта и исполнителем задачи. Хранит логин и хеш пароля. | [`Validate`](internal/models/user.go#L16-L24) |
-| `Project` | [`project.go`](internal/models/project.go#L5-L13) | Проект, внутри которого создаются задачи. Хранит владельца и может агрегировать список задач. | [`Validate`](internal/models/project.go#L15-L26) |
-| `Status` | [`task.go`](internal/models/task.go#L8-L15) | Тип статуса задачи: `new`, `in_progress`, `done`, `cancelled`. | [`IsValid`](internal/models/task.go#L107-L109) |
-| `Priority` | [`task.go`](internal/models/task.go#L17-L24) | Тип приоритета задачи: `low`, `medium`, `high`, `critical`. | [`IsValid`](internal/models/task.go#L111-L113) |
-| `Task` | [`task.go`](internal/models/task.go#L26-L39) | Главная сущность приложения. Хранит проект, название, описание, статус, приоритет, дедлайн, исполнителя, теги и историю. | [`Validate`](internal/models/task.go#L59-L90), [`ChangeStatus`](internal/models/task.go#L92-L105) |
-| `TaskFilter` | [`task.go`](internal/models/task.go#L41-L45) | Параметры фильтрации задач по статусу, приоритету и исполнителю. | Методов нет |
-| `Tag` | [`task.go`](internal/models/task.go#L46-L49) | Тег задачи. Используется для дополнительной классификации задач. | [`Validate`](internal/models/task.go#L115-L117) |
-| `TaskHistory` | [`task.go`](internal/models/task.go#L51-L57) | Запись истории изменения статуса задачи. | Методов нет |
-| `ReportType` | [`report.go`](internal/models/report.go#L3-L9) | Доменный тип отчета. Может быть `status`, `priority`, `assignee`. | [`Normalize`](internal/models/report.go#L21-L26) |
-| `Report` | [`report.go`](internal/models/report.go#L11-L14) | Итоговый отчет: тип отчета и набор агрегированных строк. | Методов нет |
-| `ReportItem` | [`report.go`](internal/models/report.go#L16-L19) | Одна строка отчета: подпись и количество задач. | Методов нет |
-
-Дополнительные функции моделей:
-
-- [`validateLength`](internal/models/common.go#L23-L29) проверяет длину строки в диапазоне;
-- [`validateMaxLength`](internal/models/common.go#L31-L37) проверяет максимальную длину строки;
-- [`dateOnly`](internal/models/common.go#L39-L41) приводит дату к началу дня, чтобы дедлайн сравнивался без учета времени.
-
-### 6.2. Сервисный слой
-
-| Структура или интерфейс | Где реализовано | За что отвечает | Методы |
-|---|---|---|---|
-| `AppLogger` | [`user.go`](internal/service/user.go#L10-L13) | Абстракция логгера, чтобы сервисы не зависели от конкретной реализации. | `Info`, `Error` |
-| `UserStore` | [`user.go`](internal/service/user.go#L20-L27) | Интерфейс репозитория пользователей. | `Create`, `List`, `Exists`, `LoginExists`, `FindByID`, `FindByLogin` |
-| `UserService` | [`user.go`](internal/service/user.go#L29-L36) | Бизнес-логика пользователей: валидация, регистрация, хеширование пароля, вход, список. | [`Create`](internal/service/user.go#L38-L59), [`Register`](internal/service/user.go#L61-L76), [`Login`](internal/service/user.go#L78-L90), [`FindByID`](internal/service/user.go#L92-L94), [`List`](internal/service/user.go#L96-L98) |
-| `ProjectStore` | [`project.go`](internal/service/project.go#L10-L15) | Интерфейс репозитория проектов. | `Create`, `List`, `ListByOwner`, `Exists` |
-| `ProjectService` | [`project.go`](internal/service/project.go#L16-L24) | Бизнес-логика проектов: валидация, проверка владельца, создание, список. | [`Create`](internal/service/project.go#L26-L47), [`List`](internal/service/project.go#L49-L51) |
-| `TaskStore` | [`task.go`](internal/service/task.go#L11-L16) | Интерфейс репозитория задач. | `Create`, `List`, `FindByID`, `UpdateStatus` |
-| `TaskFacade` | [`task.go`](internal/service/task.go#L18-L24) | Фасад для сценариев работы с задачами. Координирует валидацию, проверки, БД, историю и логирование. | [`Create`](internal/service/task.go#L40-L86), [`List`](internal/service/task.go#L88-L90), [`ChangeStatus`](internal/service/task.go#L92-L109), [`ChangeStatusForAssignee`](internal/service/task.go#L111-L133), [`SetNow`](internal/service/task.go#L36-L38) |
-| `ReportStrategy` | [`report.go`](internal/service/report.go#L12-L15) | Интерфейс стратегии построения отчета. | `ReportType`, `Generate` |
-| `StatusReportStrategy` | [`report.go`](internal/service/report.go#L17-L29) | Стратегия отчета по статусам задач. | [`ReportType`](internal/service/report.go#L19-L21), [`Generate`](internal/service/report.go#L23-L29) |
-| `PriorityReportStrategy` | [`report.go`](internal/service/report.go#L31-L43) | Стратегия отчета по приоритетам задач. | [`ReportType`](internal/service/report.go#L33-L35), [`Generate`](internal/service/report.go#L37-L43) |
-| `AssigneeReportStrategy` | [`report.go`](internal/service/report.go#L45-L57) | Стратегия отчета по исполнителям задач. | [`ReportType`](internal/service/report.go#L47-L49), [`Generate`](internal/service/report.go#L51-L57) |
-| `ReportService` | [`report.go`](internal/service/report.go#L59-L71) | Загружает задачи, хранит набор стратегий отчета и строит отчет через выбранную стратегию. | [`Build`](internal/service/report.go#L73-L87) |
-
-Дополнительные функции отчетов:
-
-- [`DefaultReportStrategies`](internal/service/report.go#L89-L100) создает набор доступных стратегий;
-- [`SelectReportStrategy`](internal/service/report.go#L102-L104) выбирает стратегию по типу отчета;
-- [`buildReport`](internal/service/report.go#L115-L127) собирает итоговый `Report` из подсчитанных значений.
-
-### 6.3. Репозитории
-
-| Структура | Где реализовано | За что отвечает | Методы |
-|---|---|---|---|
-| `UserRepository` | [`repository/user.go`](internal/repository/user.go#L10-L16) | SQL-операции с таблицей `users`. | [`Create`](internal/repository/user.go#L18-L24), [`List`](internal/repository/user.go#L26-L47), [`Exists`](internal/repository/user.go#L49-L53), `LoginExists`, `FindByID`, `FindByLogin` |
-| `ProjectRepository` | [`repository/project.go`](internal/repository/project.go#L10-L16) | SQL-операции с таблицей `projects`. | [`Create`](internal/repository/project.go#L18-L24), [`List`](internal/repository/project.go#L26-L47), [`Exists`](internal/repository/project.go#L49-L53) |
-| `TaskRepository` | [`repository/task.go`](internal/repository/task.go#L12-L18) | SQL-операции с задачами, тегами и историей статусов. | [`Create`](internal/repository/task.go#L20-L65), [`List`](internal/repository/task.go#L67-L116), [`FindByID`](internal/repository/task.go#L118-L142), [`UpdateStatus`](internal/repository/task.go#L144-L167) |
-
-### 6.4. HTTP-слой и логгер
-
-| Структура | Где реализовано | За что отвечает | Методы |
-|---|---|---|---|
-| `Server` | [`app/task.go`](internal/app/task.go#L18-L24) | HTTP-сервер приложения. Хранит сервисы, JWT-менеджер и связывает маршруты с обработчиками. | [`Routes`](internal/app/task.go#L44-L55), [`index`](internal/app/task.go#L58-L71), [`me`](internal/app/task.go#L73-L92), [`createTask`](internal/app/task.go#L94-L131), [`changeTaskStatus`](internal/app/task.go#L133-L152), [`render`](internal/app/task.go#L154-L201) |
-| `pageData` | [`app/task.go`](internal/app/task.go#L26-L38) | Данные, которые передаются в HTML-шаблон. Содержит флаг авторизации и текущего пользователя. | Методов нет |
-| `Manager` | [`jwt.go`](pkg/auth/jwt.go#L14-L17) | Генератор и валидатор JWT. | [`Generate`](pkg/auth/jwt.go#L28-L48), [`Validate`](pkg/auth/jwt.go#L50-L77) |
-| `Claims` | [`jwt.go`](pkg/auth/jwt.go#L19-L23) | Данные, которые кладутся в JWT: ID пользователя, логин и срок действия. | Методов нет |
-| `Logger` | [`logger.go`](pkg/logger/logger.go#L8-L16) | Обертка над стандартным `log/slog`. | [`Info`](pkg/logger/logger.go#L18-L20), [`Error`](pkg/logger/logger.go#L22-L24) |
-
-## 7. Как реализованы принципы ООП
-
-Инкапсуляция означает, что объект или пакет скрывает детали реализации и дает внешнему коду ограниченный набор методов для работы. В Go это делается не модификаторами `private/public`, а регистром первой буквы: `Name` экспортируется из пакета, а `name` доступен только внутри пакета.
-
-В проекте инкапсуляция показана на нескольких уровнях:
-
-- доменные типы сами проверяют свои ограничения: `User.Validate` [`user.go`](internal/models/user.go#L16-L24), `Project.Validate` [`project.go`](internal/models/project.go#L15-L26), `Task.Validate` [`task.go`](internal/models/task.go#L59-L90);
-- изменение статуса задачи вынесено в метод [`Task.ChangeStatus`](internal/models/task.go#L92-L105), поэтому вместе со сменой статуса всегда создается `TaskHistory`;
-- зависимости сервисов скрыты в неэкспортируемых полях: например `ReportService.tasks`, `ReportService.logger`, `ReportService.strategies` [`report.go`](internal/service/report.go#L59-L63). Их нельзя поменять напрямую из другого пакета;
-- создавать `ReportService` нужно через конструктор [`NewReportService`](internal/service/report.go#L65-L71), где сразу задается корректный набор стратегий;
-- выбор стратегии спрятан в неэкспортируемой функции [`selectReportStrategy`](internal/service/report.go#L106-L113), а внешний код пользуется более простым методом [`Build`](internal/service/report.go#L73-L87);
-- тип отчета оформлен как `ReportType`, а значение по умолчанию задается методом [`Normalize`](internal/models/report.go#L21-L26), поэтому правило "пустой тип отчета = отчет по статусам" находится в одном месте.
-
-Практическая польза инкапсуляции здесь такая: HTTP-слой не знает, как устроено хеширование пароля, как выбирается стратегия отчета, как пишется история статусов и как устроены SQL-запросы. Он вызывает сервисные методы, а детали остаются внутри своих пакетов.
-
-Абстракция означает работу через общие интерфейсы без знания конкретной реализации.
-
-В проекте это реализовано через:
-
-- [`UserStore`](internal/service/user.go#L20-L27);
-- [`ProjectStore`](internal/service/project.go#L10-L14);
-- [`TaskStore`](internal/service/task.go#L11-L16);
-- [`AppLogger`](internal/service/user.go#L10-L13);
-- [`ReportStrategy`](internal/service/report.go#L12-L15).
-
-Полиморфизм означает, что разные типы могут использоваться через один общий интерфейс.
-
-В проекте это реализовано через интерфейс `ReportStrategy`: `StatusReportStrategy`, `PriorityReportStrategy` и `AssigneeReportStrategy` реализуют одинаковые методы `ReportType` и `Generate` [`report.go`](internal/service/report.go#L12-L57). `ReportService` хранит их в поле `strategies` как значения интерфейса [`ReportStrategy`](internal/service/report.go#L59-L63), выбирает нужную стратегию по `report_type` и вызывает [`Generate`](internal/service/report.go#L73-L87). В этот момент конкретная структура может быть разной, но код сервиса остается одинаковым.
-
-## 8. Наследование и множественное наследование в Go
-
-В Go нет классического наследования как в Java, C++ или C#. Вместо этого используется композиция и встраивание структур, то есть embedding.
-
-Embedding работает так: если одна структура содержит другую структуру без имени поля, то поля и методы вложенной структуры становятся доступны как будто они принадлежат внешней структуре.
-
-Простое наследование в проекте:
-
-- `User` встраивает `BaseEntity`, поэтому получает поля `ID`, `CreatedAt`, `UpdatedAt`: [`User`](internal/models/user.go#L8-L14);
-- `Project` встраивает `BaseEntity`: [`Project`](internal/models/project.go#L5-L13);
-- `Task` встраивает `BaseEntity`: [`Task`](internal/models/task.go#L26-L39);
-- `Tag` и `TaskHistory` тоже встраивают `BaseEntity`: [`Tag`](internal/models/task.go#L46-L49), [`TaskHistory`](internal/models/task.go#L51-L57).
-
-Множественное наследование в проекте:
-
-- `User` одновременно встраивает `BaseEntity`, `AuditInfo`, `SoftDelete`: [`User`](internal/models/user.go#L8-L14);
-- `Project` одновременно встраивает `BaseEntity`, `AuditInfo`, `SoftDelete`: [`Project`](internal/models/project.go#L5-L13);
-- `Task` одновременно встраивает `BaseEntity`, `AuditInfo`, `SoftDelete`: [`Task`](internal/models/task.go#L26-L39).
-
-Что это дает:
-
-- от `BaseEntity` сущности получают технические поля идентификатора и дат;
-- от `AuditInfo` получают поле `CreatedBy`;
-- от `SoftDelete` получают поле `DeletedAt`;
-- код не дублирует одинаковые поля в каждой сущности.
-
-Пример работы embedding в коде: репозиторий может записывать `task.ID`, `task.CreatedAt`, `task.CreatedBy`, хотя эти поля объявлены во встроенных структурах [`BaseEntity`](internal/models/common.go#L9-L13) и [`AuditInfo`](internal/models/common.go#L15-L17). Это используется при сохранении задачи в [`TaskRepository.Create`](internal/repository/task.go#L20-L65).
-
-## 9. Связи между объектами
-
-Ассоциация - это связь, при которой один объект знает о другом, но не владеет его жизненным циклом.
-
-В проекте ассоциация реализована так:
-
-- `Task.AssigneeID` связывает задачу с пользователем-исполнителем: [`Task`](internal/models/task.go#L26-L39);
-- в БД это внешний ключ `assignee_id` на таблицу `users`: [`tasks`](migrations/001_init.sql#L23-L36);
-- `TaskFacade.Create` проверяет, что проект существует, принадлежит текущему пользователю и что исполнитель существует: [`TaskFacade.Create`](internal/service/task.go#L48-L79).
-
-Агрегация - это связь “целое содержит части”, но части могут существовать отдельно.
-
-В проекте агрегация реализована так:
-
-- `Project` содержит поле `Tasks []Task`: [`Project`](internal/models/project.go#L5-L13);
-- задача при этом хранится в отдельной таблице `tasks` и может быть загружена отдельно: [`TaskRepository.List`](internal/repository/task.go#L67-L116).
-
-Композиция - это более сильная связь, когда часть логически принадлежит целому.
-
-В проекте композиция реализована так:
-
-- `Task` содержит `History []TaskHistory`: [`Task`](internal/models/task.go#L26-L39);
-- `Task.ChangeStatus` создает запись истории при изменении статуса: [`ChangeStatus`](internal/models/task.go#L92-L105);
-- в БД история связана с задачей через `ON DELETE CASCADE`, то есть при удалении задачи история удалится вместе с ней: [`task_history`](migrations/001_init.sql#L51-L57).
-
-Связь многие-ко-многим означает, что одна задача может иметь несколько тегов, а один тег может принадлежать нескольким задачам.
-
-В проекте это реализовано через:
-
-- `Task.Tags []Tag`: [`Task`](internal/models/task.go#L26-L39);
-- таблицу `tags`: [`tags`](migrations/001_init.sql#L38-L43);
-- связующую таблицу `task_tags`: [`task_tags`](migrations/001_init.sql#L45-L49);
-- сохранение тегов в [`TaskRepository.Create`](internal/repository/task.go#L37-L54).
-
-Зависимость означает, что один слой использует другой для выполнения своей работы.
-
-В проекте зависимости такие:
-
-- `app` зависит от сервисов через структуру [`Server`](internal/app/task.go#L16-L21);
-- `service` зависит от интерфейсов репозиториев, например [`TaskStore`](internal/service/task.go#L11-L16);
-- `repository` зависит от `database/sql` и PostgreSQL;
-- `cmd/taskflow/main.go` собирает зависимости вместе в точке входа приложения: [`main`](cmd/taskflow/main.go).
-
-## 10. Паттерны проектирования
-
-### 10.1. Facade
-
-`Facade` - паттерн, который дает простой интерфейс к сложной подсистеме. Вместо того чтобы обработчик HTTP-запроса сам выполнял валидацию, проверки в БД, сохранение, историю и логирование, он вызывает один фасад.
-
-В проекте фасад реализован структурой [`TaskFacade`](internal/service/task.go#L18-L24).
-
-Что делает `TaskFacade.Create`:
-
-- назначает статус `new`, если статус не передан: [`Create`](internal/service/task.go#L40-L43);
-- валидирует задачу через `Task.Validate`: [`Create`](internal/service/task.go#L44-L47);
-- проверяет существование проекта: [`Create`](internal/service/task.go#L48-L57);
-- проверяет, что проект принадлежит текущему пользователю: [`Create`](internal/service/task.go#L58-L69);
-- проверяет существование исполнителя: [`Create`](internal/service/task.go#L70-L79);
-- сохраняет задачу через репозиторий: [`Create`](internal/service/task.go#L80-L85);
-- пишет лог.
-
-Что делает `TaskFacade.ChangeStatusForAssignee`:
-
-- загружает задачу по ID: [`ChangeStatusForAssignee`](internal/service/task.go#L111-L116);
-- проверяет, что задача принадлежит текущему пользователю: [`ChangeStatusForAssignee`](internal/service/task.go#L117-L121);
-- меняет статус через `Task.ChangeStatus`: [`ChangeStatusForAssignee`](internal/service/task.go#L122-L126);
-- сохраняет новый статус и историю: [`ChangeStatusForAssignee`](internal/service/task.go#L127-L133).
-
-Почему паттерн подходит: операции над задачей затрагивают несколько подсистем, и фасад скрывает эту сложность от HTTP-слоя.
-
-### 10.2. Strategy
-
-`Strategy` - паттерн, который выносит разные алгоритмы в отдельные классы/структуры с общим интерфейсом. Это позволяет заменять алгоритм без переписывания сервиса.
-
-`report_type` - это значение из формы отчета [`frontend/index.html`](frontend/index.html#L231-L235). Оно показывает, какой именно отчет нужно построить:
-
-| `report_type` | Какая стратегия выбирается | Что считает |
-|---|---|---|
-| `status` | [`StatusReportStrategy`](internal/service/report.go#L17-L29) | Количество задач в каждом статусе |
-| `priority` | [`PriorityReportStrategy`](internal/service/report.go#L31-L43) | Количество задач с каждым приоритетом |
-| `assignee` | [`AssigneeReportStrategy`](internal/service/report.go#L45-L57) | Количество задач по исполнителям |
-
-Пустое значение `report_type` считается значением `status`; это правило находится в [`ReportType.Normalize`](internal/models/report.go#L21-L26).
-
-В проекте общий интерфейс стратегии:
-
-- [`ReportStrategy`](internal/service/report.go#L12-L15).
-
-Конкретные стратегии:
-
-- [`StatusReportStrategy`](internal/service/report.go#L17-L29) считает задачи по статусам;
-- [`PriorityReportStrategy`](internal/service/report.go#L31-L43) считает задачи по приоритетам;
-- [`AssigneeReportStrategy`](internal/service/report.go#L45-L57) считает задачи по исполнителям.
-
-Набор стратегий создается в [`DefaultReportStrategies`](internal/service/report.go#L89-L100). Выбор стратегии выполняется в [`selectReportStrategy`](internal/service/report.go#L106-L113). Использование выбранной стратегии находится в [`ReportService.Build`](internal/service/report.go#L73-L87): сервис вызывает `strategy.Generate(tasks)` через интерфейс, поэтому это явный пример полиморфизма.
-
-Как `report_type` связан с полиморфизмом:
-
-1. HTTP-слой получает строку из формы и превращает ее в `models.ReportType`: [`task.go`](internal/app/task.go#L88), [`report.go`](internal/app/report.go#L21).
-2. `ReportService.Build` передает этот тип в `selectReportStrategy`: [`report.go`](internal/service/report.go#L73-L75).
-3. `selectReportStrategy` возвращает значение интерфейса `ReportStrategy`: [`report.go`](internal/service/report.go#L106-L113).
-4. Дальше сервис вызывает `strategy.Generate(tasks)`: [`report.go`](internal/service/report.go#L84).
-
-Именно четвертый шаг является полиморфизмом: переменная `strategy` имеет интерфейсный тип `ReportStrategy`, но внутри нее может лежать `StatusReportStrategy`, `PriorityReportStrategy` или `AssigneeReportStrategy`. Go сам вызывает метод конкретной структуры.
-
-Почему паттерн подходит: отчеты имеют одинаковую форму результата `Report`, но разные правила подсчета.
-
-Почему `Facade` и `Strategy` сочетаются: `Facade` управляет сложными пользовательскими сценариями, а `Strategy` отвечает за заменяемый алгоритм отчета. Они решают разные задачи и не конфликтуют.
-
-## 11. JWT-авторизация
-
-Авторизация реализована через JWT без ролей. Роли были удалены, потому что они не влияли на поведение приложения.
-
-Как работает регистрация:
-
-- пользователь вводит `login` и `password` в форме регистрации: [`frontend/index.html`](frontend/index.html#L84-L95);
-- обработчик [`register`](internal/app/user.go#L10-L25) вызывает [`UserService.Register`](internal/service/user.go#L61-L76);
-- пароль проверяется функцией [`validatePassword`](internal/service/user.go#L100-L105);
-- пароль превращается в хеш функцией [`hashPassword`](internal/service/user.go#L107-L114);
-- после успешной регистрации сервер создает JWT и кладет его в httpOnly cookie: [`setAuthCookie`](internal/app/user.go#L60-L74).
-
-Как работает вход:
-
-- пользователь вводит `login` и `password`: [`frontend/index.html`](frontend/index.html#L97-L107);
-- обработчик [`login`](internal/app/user.go#L27-L42) вызывает [`UserService.Login`](internal/service/user.go#L78-L90);
-- пароль проверяется через [`verifyPassword`](internal/service/user.go#L116-L131);
-- при успехе сервер выдает JWT-cookie.
-
-Как работает персональная страница:
-
-- JWT хранится в cookie `taskflow_token`;
-- метод [`currentUser`](internal/app/task.go#L251-L265) читает cookie, проверяет JWT и загружает пользователя из БД;
-- маршрут `/me` показывает страницу текущего пользователя: [`me`](internal/app/task.go#L73-L92);
-- проекты загружаются только по `owner_id` текущего пользователя: [`render`](internal/app/task.go#L167-L183);
-- задачи и отчеты фильтруются по `AssigneeID` текущего пользователя: [`render`](internal/app/task.go#L154-L183).
-
-JWT реализован в [`pkg/auth`](pkg/auth/jwt.go): [`Generate`](pkg/auth/jwt.go#L28-L48) создает токен, [`Validate`](pkg/auth/jwt.go#L50-L77) проверяет подпись, срок действия и данные пользователя.
+```
+taskflow/
+├── cmd/
+│   └── taskflow/
+│       └── main.go              # Точка входа в приложение
+├── frontend/
+│   └── index.html               # Веб-интерфейс (HTML-шаблоны)
+├── internal/
+│   ├── app/
+│   │   ├── project.go           # HTTP-обработчики для проектов
+│   │   ├── report.go            # HTTP-обработчики для отчётов
+│   │   ├── task.go              # HTTP-обработчики для задач
+│   │   └── user.go              # HTTP-обработчики для пользователей
+│   ├── models/
+│   │   ├── common.go            # Базовые структуры и функции валидации
+│   │   ├── project.go           # Модель проекта
+│   │   ├── report.go            # Модели для отчётов
+│   │   ├── task.go              # Модель задачи
+│   │   ├── user.go              # Модель пользователя
+│   │   └── *_test.go            # Unit-тесты для моделей
+│   ├── repository/
+│   │   ├── project.go           # Репозиторий проектов
+│   │   ├── report.go            # Заготовка репозитория отчётов
+│   │   ├── task.go              # Репозиторий задач
+│   │   └── user.go              # Репозиторий пользователей
+│   └── service/
+│       ├── project.go           # Бизнес-логика проектов
+│       ├── report.go            # Бизнес-логика отчётов
+│       ├── report_exporter.go   # Экспортёры отчётов (Strategy)
+│       ├── task.go              # Бизнес-логика задач (Facade)
+│       ├── task_test.go         # Unit-тесты для задач
+│       └── user.go              # Бизнес-логика пользователей
+├── migrations/
+│   └── 001_init.sql             # Миграции базы данных
+├── build/
+│   └── Dockerfile               # Docker-конфигурация
+├── docker-compose.yml           # Запуск PostgreSQL
+├── go.mod                       # Зависимости Go
+└── PLAN.md                      # Планирование проекта
+```
+
+---
+
+## 6. Принципы ООП
+
+### 6.1. Инкапсуляция
+
+**Инкапсуляция** — это принцип ООП, при котором данные и методы, работающие с этими данными, объединяются в единый объект, скрывая внутреннюю реализацию от внешнего мира. В Go инкапсуляция реализуется через экспортируемые (с заглавной буквы) и неэкспортируемые (со строчной буквы) идентификаторы.
+
+#### Приватные поля и методы
+
+В нашем проекте инкапсуляция реализуется следующим образом:
+
+**В моделях (internal/models/):**
+- Поля структур с маленькой буквы недоступны извне пакета
+- Валидация выполняется через методы структур (например, `Task.Validate()`)
+
+```go
+// internal/models/task.go
+type Task struct {
+    BaseEntity
+    AuditInfo
+    SoftDelete
+    ProjectID   int64     // экспортируемое поле
+    Title       string    // экспортируемое поле
+    Description string    // экспортируемое поле
+    Status      Status    // экспортируемое поле
+    Priority    Priority  // экспортируемое поле
+    Deadline    time.Time // экспортируемое поле
+    AssigneeID  int64     // экспортируемое поле
+    Tags        []Tag     // экспортируемое поле
+    History     []TaskHistory // экспортируемое поле
+}
+
+// Валидация — метод структуры, инкапсулирующий логику проверки
+func (t Task) Validate(now time.Time) error {
+    if t.ProjectID <= 0 {
+        return fmt.Errorf("project_id is required")
+    }
+    if err := validateLength("title", t.Title, 3, 100); err != nil {
+        return err
+    }
+    // ... другие проверки
+    return nil
+}
+```
+
+**В сервисном слое (internal/service/):**
+- Фасад `TaskFacade` скрывает сложность взаимодействия с несколькими хранилищами
+- Приватные поля структуры недоступны извне
+
+```go
+// internal/service/task.go
+type TaskFacade struct {
+    tasks    TaskStore   // приватное поле
+    projects ProjectStore // приватное поле
+    users    UserStore   // приватное поле
+    logger   AppLogger   // приватное поле
+    now      func() time.Time // приватное поле
+}
+
+// Приватный метод — недоступен извне пакета
+func (f *TaskFacade) validateTask(ctx context.Context, task models.Task) error {
+    // логика валидации
+}
+```
+
+**В репозиториях (internal/repository/):**
+- Структуры репозиториев имеют приватное поле `db` для работы с БД
+
+```go
+// internal/repository/task.go
+type TaskRepository struct {
+    db *sql.DB // приватное поле — подключение к БД недоступно извне
+}
+```
+
+#### Зачем нужна инкапсуляция
+
+1. **Защита данных**: предотвращение некорректного изменения состояния объекта
+2. **Сокрытие реализации**: внешний код не зависит от внутренней структуры
+3. **Упрощение поддержки**: изменение внутренней реализации не ломает внешний код
+4. **Контроль доступа**: можно явно определить, какие данные доступны для чтения/записи
+
+---
+
+### 6.2. Абстракция
+
+**Абстракция** — это принцип ООП, позволяющий выделить существенные характеристики объекта, скрывая несущественные детали. В Go абстракция реализуется через интерфейсы.
+
+#### Интерфейсы в проекте
+
+**TaskStore — абстракция хранилища задач:**
+```go
+// internal/service/task.go
+type TaskStore interface {
+    Create(ctx context.Context, task *models.Task) error
+    List(ctx context.Context, filter models.TaskFilter) ([]models.Task, error)
+    FindByID(ctx context.Context, id int64) (models.Task, error)
+    UpdateStatus(ctx context.Context, task models.Task, history models.TaskHistory) error
+    Delete(ctx context.Context, id int64) error
+}
+```
+
+`TaskFilter` в текущей реализации не является пользовательским фильтром по статусу или приоритету. Он используется как техническое ограничение доступа: `AssigneeID` задается из JWT текущего пользователя, чтобы список задач и экспорт не показывали чужие задачи.
+
+**ProjectStore — абстракция хранилища проектов:**
+```go
+// internal/service/project.go
+type ProjectStore interface {
+    Create(ctx context.Context, project *models.Project) error
+    List(ctx context.Context) ([]models.Project, error)
+    ListByOwner(ctx context.Context, ownerID int64) ([]models.Project, error)
+    Exists(ctx context.Context, id int64) (bool, error)
+    OwnedBy(ctx context.Context, projectID int64, ownerID int64) (bool, error)
+    Delete(ctx context.Context, id int64) error
+}
+```
+
+**UserStore — абстракция хранилища пользователей:**
+```go
+// internal/service/user.go
+type UserStore interface {
+    Create(ctx context.Context, user *models.User) error
+    List(ctx context.Context) ([]models.User, error)
+    Exists(ctx context.Context, id int64) (bool, error)
+    LoginExists(ctx context.Context, login string) (bool, error)
+    FindByID(ctx context.Context, id int64) (models.User, error)
+    FindByLogin(ctx context.Context, login string) (models.User, error)
+}
+```
+
+**ReportExporter — абстракция экспортёра отчётов:**
+```go
+// internal/service/report_exporter.go
+type ReportExporter interface {
+    Format() string
+    ExportTasks(tasks []models.Task) ([]byte, error)
+}
+```
+
+#### Преимущества абстракции
+
+1. **Взаимозаменяемость**: можно подменить реализацию, не меняя код клиента
+2. **Независимость от деталей**: клиент работает с абстракцией, а не с конкретной реализацией
+3. **Упрощение тестирования**: можно подставить мок-реализацию интерфейса
+4. **Гибкость архитектуры**: легко добавить новые реализации
+
+---
+
+### 6.3. Полиморфизм
+
+**Полиморфизм** — это принцип ООП, позволяющий объектам разных типов обрабатываться через единый интерфейс. В Go полиморфизм реализуется через интерфейсы.
+
+#### Реализация полиморфизма в проекте
+
+##### 1. Паттерн Strategy для экспорта отчётов
+
+Интерфейс `ReportExporter` определяет единый контракт для всех экспортёров:
+
+```go
+// internal/service/report_exporter.go
+type ReportExporter interface {
+    Format() string
+    ExportTasks(tasks []models.Task) ([]byte, error)
+}
+```
+
+Три реализации этого интерфейса:
+
+**JSONExporter:**
+```go
+type JSONExporter struct{}
+
+func (e JSONExporter) Format() string {
+    return "json"
+}
+
+func (e JSONExporter) ExportTasks(tasks []models.Task) ([]byte, error) {
+    return json.MarshalIndent(tasks, "", "  ")
+}
+```
+
+**XMLExporter:**
+```go
+type XMLExporter struct{}
+
+func (e XMLExporter) Format() string {
+    return "xml"
+}
+
+func (e XMLExporter) ExportTasks(tasks []models.Task) ([]byte, error) {
+    // сериализация в XML
+}
+```
+
+**HTMLExporter:**
+```go
+type HTMLExporter struct{}
+
+func (e HTMLExporter) Format() string {
+    return "html"
+}
+
+func (e HTMLExporter) ExportTasks(tasks []models.Task) ([]byte, error) {
+    // генерация HTML-таблицы
+}
+```
+
+Клиентский код работает с интерфейсом, не зная о конкретной реализации:
+
+```go
+// internal/service/report.go
+type ReportService struct {
+    tasks     TaskStore
+    logger    AppLogger
+    exporters *ExporterRegistry
+}
+
+func (s *ReportService) Build(ctx context.Context, filter models.TaskFilter, format string) ([]byte, error) {
+    tasks, err := s.tasks.List(ctx, filter)
+    if err != nil {
+        return nil, err
+    }
+    exporter := s.exporters.Get(format)
+    return exporter.ExportTasks(tasks)
+}
+```
+
+HTTP-обработчик `/report` передает в `Build` фильтр `models.TaskFilter{AssigneeID: user.ID}`. Поэтому экспорт строится только по задачам текущего пользователя.
+
+##### 2. Полиморфизм через интерфейсы хранилищ
+
+Один и тот же код сервиса может работать с разными реализациями хранилищ:
+
+```go
+// Создание фасада с конкретными реализациями
+facade := service.NewTaskFacade(
+    repository.NewTaskRepository(db),    // реализация TaskStore
+    repository.NewProjectRepository(db), // реализация ProjectStore
+    repository.NewUserRepository(db),    // реализация UserStore
+    logger,
+)
+
+// В тестах можно подставить мок-реализации
+mockTaskStore := &MockTaskStore{}
+facade := service.NewTaskFacade(mockTaskStore, mockProjectStore, mockUserStore, logger)
+```
+
+#### Преимущества полиморфизма
+
+1. **Расширяемость**: добавление новых форматов экспорта не требует изменения существующего кода
+2. **Унификация**: единый интерфейс для работы с разными реализациями
+3. **Тестируемость**: легко подменить реализацию на мок
+
+---
+
+### 6.4. Наследование
+
+**Наследование** — это принцип ООП, позволяющий создавать новые классы на основе существующих. В Go наследование реализуется через **встраивание структур** (struct embedding).
+
+#### Одиночное наследование
+
+В Go одиночное наследование реализуется через встраивание одной структуры в другую:
+
+```go
+// internal/models/common.go
+type BaseEntity struct {
+    ID        int64
+    CreatedAt time.Time
+    UpdatedAt time.Time
+}
+
+func (e BaseEntity) GetID() int64 {
+    return e.ID
+}
+
+func (e BaseEntity) GetCreatedAt() time.Time {
+    return e.CreatedAt
+}
+```
+
+Структура `Task` наследует от `BaseEntity`:
+
+```go
+// internal/models/task.go
+type Task struct {
+    BaseEntity           // встраивание — наследование
+    ProjectID   int64
+    Title       string
+    // ...
+}
+```
+
+Теперь `Task` имеет доступ к полям и методам `BaseEntity`:
+
+```go
+task := Task{BaseEntity: BaseEntity{ID: 1}, Title: "Test"}
+id := task.BaseEntity.GetID() // явный вызов метода встроенной структуры
+createdAt := task.CreatedAt  // доступ к унаследованному полю
+```
+
+#### Множественное наследование
+
+Go поддерживает множественное наследование через встраивание нескольких структур:
+
+```go
+// internal/models/common.go
+
+// BaseEntity — базовая сущность с ID и временными метками
+type BaseEntity struct {
+    ID        int64
+    CreatedAt time.Time
+    UpdatedAt time.Time
+}
+
+func (e BaseEntity) GetID() int64 {
+    return e.ID
+}
+
+func (e BaseEntity) GetCreatedAt() time.Time {
+    return e.CreatedAt
+}
+
+// AuditInfo — информация о создателе записи
+type AuditInfo struct {
+    CreatedBy int64
+}
+
+// GetID возвращает ID создателя записи
+func (a AuditInfo) GetID() int64 {
+    return a.CreatedBy
+}
+
+// GetCreatedBy возвращает ID создателя (уникальный метод)
+func (a AuditInfo) GetCreatedBy() int64 {
+    return a.CreatedBy
+}
+
+// SoftDelete — мягкое удаление
+type SoftDelete struct {
+    DeletedAt *time.Time
+}
+
+// GetID возвращает статус удаления (0 — не удалён, -1 — удалён)
+func (s SoftDelete) GetID() int64 {
+    if s.DeletedAt != nil {
+        return -1
+    }
+    return 0
+}
+
+// IsDeleted проверяет, удалена ли запись (уникальный метод)
+func (s SoftDelete) IsDeleted() bool {
+    return s.DeletedAt != nil
+}
+```
+
+Структура `Task` наследует от трёх структур:
+
+```go
+// internal/models/task.go
+type Task struct {
+    BaseEntity   // наследование #1
+    AuditInfo    // наследование #2
+    SoftDelete   // наследование #3
+    ProjectID    int64
+    Title        string
+    Description  string
+    Status       Status
+    Priority     Priority
+    Deadline     time.Time
+    AssigneeID   int64
+    Tags         []Tag
+    History      []TaskHistory
+}
+```
+
+#### Разрешение конфликтов методов
+
+При множественном наследовании может возникнуть конфликт, когда встроенные структуры имеют методы с одинаковыми названиями. В нашем случае все три структуры имеют метод `GetID()`:
+
+- `BaseEntity.GetID()` — возвращает ID сущности
+- `AuditInfo.GetID()` — возвращает ID создателя
+- `SoftDelete.GetID()` — возвращает статус удаления
+
+**Как Go разрешает конфликты:**
+
+1. Если несколько встроенных структур имеют метод с одинаковым именем на одном уровне, вызов `task.GetID()` будет неоднозначным и не скомпилируется.
+2. Для доступа к конфликтующим методам нужно явно указать встроенную структуру: `task.BaseEntity.GetID()`, `task.AuditInfo.GetID()`, `task.SoftDelete.GetID()`.
+
+Пример использования в методе `GetTaskInfo()`:
+
+```go
+// internal/models/task.go
+func (t Task) GetTaskInfo() string {
+    // Уникальные методы — работают напрямую без конфликтов
+    creatorID := t.GetCreatedBy()    // метод из AuditInfo
+    isDeleted := t.IsDeleted()       // метод из SoftDelete
+    createdAt := t.GetCreatedAt()    // метод из BaseEntity
+
+    // Методы с одинаковым названием — требуют явного указания структуры
+    entityID := t.BaseEntity.GetID()          // ID задачи из BaseEntity
+    creatorIDFromGetID := t.AuditInfo.GetID() // ID создателя из AuditInfo
+    deleteID := t.SoftDelete.GetID()          // статус удаления из SoftDelete
+
+    return fmt.Sprintf("Task[id=%d, creator=%d, deleted=%v, created=%v, entityID=%d, creatorID=%d, deleteStatus=%d]",
+        t.ID, creatorID, isDeleted, createdAt, entityID, creatorIDFromGetID, deleteID)
+}
+```
+
+#### Преимущества наследования в Go
+
+1. **Повторное использование кода**: общая логика выносится в базовые структуры
+2. **Композиция вместо наследования**: Go поощряет композицию, но поддерживает наследование через встраивание
+3. **Гибкость**: можно наследовать от нескольких структур
+4. **Явное разрешение конфликтов**: разработчик контролирует, какой метод вызывать
+
+---
+
+## 7. Паттерны проектирования
+
+### 7.1. Facade (Фасад)
+
+**Назначение:** предоставить унифицированный интерфейс к набору интерфейсов в подсистеме, упрощая работу с ней.
+
+**Суть паттерна:** скрыть сложность взаимодействия нескольких компонентов за простым интерфейсом.
+
+#### Реализация в проекте
+
+`TaskFacade` — фасад для работы с задачами, который скрывает взаимодействие с тремя хранилищами:
+
+```go
+// internal/service/task.go
+type TaskFacade struct {
+    tasks    TaskStore
+    projects ProjectStore
+    users    UserStore
+    logger   AppLogger
+    now      func() time.Time
+}
+
+func NewTaskFacade(tasks TaskStore, projects ProjectStore, users UserStore, logger AppLogger) *TaskFacade {
+    return &TaskFacade{
+        tasks:    tasks,
+        projects: projects,
+        users:    users,
+        logger:   logger,
+        now:      time.Now,
+    }
+}
+```
+
+**Что скрывает фасад:**
+
+1. **Валидация задачи:** проверка проекта, владельца, исполнителя
+2. **Проверка существования:** верификация, что проект и пользователь существуют
+3. **Проверка прав:** задача должна принадлежать проекту пользователя
+4. **Логирование:** все операции логируются
+
+```go
+func (f *TaskFacade) Create(ctx context.Context, task models.Task) (models.Task, error) {
+    // 1. Валидация задачи
+    if err := task.Validate(f.now()); err != nil {
+        f.logger.Error("task validation failed", "error", err)
+        return models.Task{}, err
+    }
+
+    // 2. Проверка существования проекта
+    projectExists, err := f.projects.Exists(ctx, task.ProjectID)
+    if err != nil {
+        f.logger.Error("failed to check task project", "error", err)
+        return models.Task{}, err
+    }
+    if !projectExists {
+        return models.Task{}, fmt.Errorf("project_id must reference an existing project")
+    }
+
+    // 3. Проверка прав на проект
+    if task.CreatedBy > 0 {
+        projectOwned, err := f.projects.OwnedBy(ctx, task.ProjectID, task.CreatedBy)
+        if err != nil {
+            return models.Task{}, err
+        }
+        if !projectOwned {
+            return models.Task{}, fmt.Errorf("project_id must reference current user's project")
+        }
+    }
+
+    // 4. Проверка существования исполнителя
+    assigneeExists, err := f.users.Exists(ctx, task.AssigneeID)
+    if err != nil {
+        return models.Task{}, err
+    }
+    if !assigneeExists {
+        return models.Task{}, fmt.Errorf("assignee_id must reference an existing user")
+    }
+
+    // 5. Создание задачи
+    if err := f.tasks.Create(ctx, &task); err != nil {
+        f.logger.Error("failed to create task", "error", err)
+        return models.Task{}, err
+    }
+
+    f.logger.Info("task created", "task_id", task.ID)
+    return task, nil
+}
+```
+
+**Преимущества использования Facade:**
+
+1. **Упрощение клиентского кода:** клиент работает с одним методом вместо нескольких
+2. **Слабая связанность:** клиент не зависит от внутренней структуры
+3. **Изоляция сложности:** вся логика проверок скрыта в фасаде
+4. **Единая точка входа:** все операции проходят через фасад
+
+---
+
+### 7.2. Strategy (Стратегия)
+
+**Назначение:** определить семейство алгоритмов, инкапсулировать каждый из них и сделать их взаимозаменяемыми.
+
+**Суть паттерна:** вынести поведение в отдельные классы, которые можно менять в runtime.
+
+#### Реализация в проекте
+
+Интерфейс `ReportExporter` определяет стратегию экспорта:
+
+```go
+// internal/service/report_exporter.go
+type ReportExporter interface {
+    Format() string
+    ExportTasks(tasks []models.Task) ([]byte, error)
+}
+```
+
+Три реализации стратегии:
+
+```go
+// JSON — экспорт в JSON
+type JSONExporter struct{}
+func (e JSONExporter) Format() string { return "json" }
+func (e JSONExporter) ExportTasks(tasks []models.Task) ([]byte, error) {
+    return json.MarshalIndent(tasks, "", "  ")
+}
+
+// XML — экспорт в XML
+type XMLExporter struct{}
+func (e XMLExporter) Format() string { return "xml" }
+func (e XMLExporter) ExportTasks(tasks []models.Task) ([]byte, error) {
+    // сериализация в XML
+}
+
+// HTML — экспорт для отображения на фронтенде
+type HTMLExporter struct{}
+func (e HTMLExporter) Format() string { return "html" }
+func (e HTMLExporter) ExportTasks(tasks []models.Task) ([]byte, error) {
+    // генерация HTML
+}
+```
+
+**Реестр стратегий** — позволяет выбрать нужную стратегию:
+
+```go
+type ExporterRegistry struct {
+    exporters map[string]ReportExporter
+}
+
+func NewExporterRegistry() *ExporterRegistry {
+    return &ExporterRegistry{
+        exporters: map[string]ReportExporter{
+            "json": JSONExporter{},
+            "xml":  XMLExporter{},
+            "html": HTMLExporter{},
+        },
+    }
+}
+
+func (r *ExporterRegistry) Get(format string) ReportExporter {
+    if exp, ok := r.exporters[format]; ok {
+        return exp
+    }
+    return HTMLExporter{} // стратегия по умолчанию
+}
+```
+
+**Использование в сервисе:**
+
+```go
+func (s *ReportService) Build(ctx context.Context, filter models.TaskFilter, format string) ([]byte, error) {
+    tasks, err := s.tasks.List(ctx, filter)
+    if err != nil {
+        return nil, err
+    }
+    exporter := s.exporters.Get(format) // выбор стратегии
+    return exporter.ExportTasks(tasks)
+}
+```
+
+В обработчике отчета фильтр формируется из текущего пользователя:
+
+```go
+filter := models.TaskFilter{AssigneeID: user.ID}
+exported, err := s.reports.Build(r.Context(), filter, format)
+```
+
+Это важно для безопасности: пользователь получает экспорт только своих задач.
+
+**Преимущества использования Strategy:**
+
+1. **Взаимозаменяемость:** можно менять формат экспорта без изменения клиентского кода
+2. **Расширяемость:** добавление нового формата не требует изменения существующего кода
+3. **Изоляция алгоритмов:** каждый экспортёр инкапсулирует свою логику
+4. **Тестируемость:** можно тестировать каждый экспортёр отдельно
+
+---
+
+### 7.3. Сочетание паттернов
+
+**Facade + Strategy** — эти паттерны отлично сочетаются:
+
+1. **Facade** (`TaskFacade`) предоставляет простой интерфейс к сложной подсистеме управления задачами
+2. **Strategy** (`ReportExporter`) позволяет гибко выбирать алгоритм экспорта
+
+Клиентский код работает через Facade, который внутри может использовать различные Strategy:
+
+```go
+// HTTP-обработчик использует Facade
+handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+    format := r.URL.Query().Get("format")
+    filter := models.TaskFilter{AssigneeID: userID}
+    data, err := reportService.Build(r.Context(), filter, format)
+    // ...
+})
+```
+
+---
+
+## 8. Связи между объектами
+
+### 8.1. Ассоциация (Association)
+
+**Определение:** отношение, при котором объекты одного класса связаны с объектами другого класса. Это самая общая форма связи.
+
+**В коде:** реализуется через поля структур, ссылающиеся на другие структуры.
+
+#### Примеры в проекте
+
+**Task → User (Assignee):**
+```go
+// Задача ссылается на исполнителя через ID
+type Task struct {
+    AssigneeID int64  // ссылка на пользователя
+    // ...
+}
+```
+
+**Project → User (Owner):**
+```go
+type Project struct {
+    OwnerID int64  // ссылка на владельца
+    // ...
+}
+```
+
+**В БД:**
+```sql
+-- Внешний ключ связывает задачу с пользователем
+ALTER TABLE tasks ADD CONSTRAINT fk_task_assignee
+    FOREIGN KEY (assignee_id) REFERENCES users(id);
+```
+
+---
+
+### 8.2. Агрегация (Aggregation)
+
+**Определение:** отношение "часть-целое", при котором часть может существовать независимо от целого.
+
+**В коде:** реализуется через встраивание структур или поля со ссылками.
+
+#### Примеры в проекте
+
+**Task → Tags:**
+```go
+type Task struct {
+    Tags []Tag  // теги принадлежат задаче, но могут существовать независимо
+}
+```
+
+**Project → Tasks:**
+```go
+type Project struct {
+    Tasks []Task  // задачи принадлежат проекту
+}
+```
+
+**В БД:**
+```sql
+-- Связь многие-ко-многим через промежуточную таблицу
+CREATE TABLE task_tags (
+    task_id BIGINT REFERENCES tasks(id),
+    tag_id BIGINT REFERENCES tags(id),
+    PRIMARY KEY (task_id, tag_id)
+);
+```
+
+---
+
+### 8.3. Композиция (Composition)
+
+**Определение:** отношение "часть-целое", при котором часть не может существовать без целого.
+
+**В коде:** реализуется через встраивание структур (embedded structs).
+
+#### Примеры в проекте
+
+**Task встраивает BaseEntity, AuditInfo, SoftDelete:**
+```go
+type Task struct {
+    BaseEntity   // Task "содержит" BaseEntity
+    AuditInfo    // Task "содержит" AuditInfo
+    SoftDelete   // Task "содержит" SoftDelete
+    // ...
+}
+```
+
+Это композиция, потому что:
+- `BaseEntity` не имеет смысла без сущности (Task, Project, User)
+- `AuditInfo` и `SoftDelete` — это миксины, добавляющие функциональность
+
+**В БД:**
+```sql
+-- Поля из встроенных структур хранятся в той же таблице
+CREATE TABLE tasks (
+    id BIGSERIAL PRIMARY KEY,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    created_by BIGINT NOT NULL DEFAULT 0,
+    deleted_at TIMESTAMP NULL,
+    -- остальные поля задачи
+);
+```
+
+---
+
+### 8.4. Зависимость (Dependency)
+
+**Определение:** отношение, при котором изменение одного класса влияет на другой.
+
+**В коде:** реализуется через параметры методов, интерфейсы.
+
+#### Примеры в проекте
+
+**TaskFacade зависит от интерфейсов:**
+```go
+type TaskFacade struct {
+    tasks    TaskStore     // зависимость от интерфейса
+    projects ProjectStore  // зависимость от интерфейса
+    users    UserStore     // зависимость от интерфейса
+}
+```
+
+**Методы принимают интерфейсы:**
+```go
+func (f *TaskFacade) Create(ctx context.Context, task models.Task) (models.Task, error) {
+    // метод зависит от контекста
+}
+```
+
+---
+
+### 8.5. Реализация (Implementation)
+
+**Определение:** отношение между интерфейсом и его реализацией.
+
+**В коде:** структура реализует интерфейс.
+
+#### Примеры в проекте
+
+**TaskRepository реализует TaskStore:**
+```go
+type TaskRepository struct {
+    db *sql.DB
+}
+
+func (r *TaskRepository) Create(ctx context.Context, task *models.Task) error {
+    // реализация
+}
+
+func (r *TaskRepository) List(ctx context.Context, filter models.TaskFilter) ([]models.Task, error) {
+    // реализация
+}
+```
+
+`TaskRepository` реализует `TaskStore` неявно: в Go структура считается реализацией интерфейса, если у нее есть все методы интерфейса.
+
+---
+
+## 9. Тестирование
+
+### 9.1. Виды тестов
+
+В проекте реализованы следующие виды unit-тестов:
+
+#### Позитивные тесты (Positive Tests)
+
+Проверка корректной работы при валидных данных:
+
+```go
+// internal/models/task_test.go
+func TestTaskValidatePositive(t *testing.T) {
+    now := time.Date(2026, 5, 15, 12, 0, 0, 0, time.UTC)
+    task := validTask(now)
+    if err := task.Validate(now); err != nil {
+        t.Fatalf("expected valid task, got error: %v", err)
+    }
+}
+```
+
+#### Негативные тесты (Negative Tests)
+
+Проверка обработки ошибок при некорректных данных:
+
+```go
+// internal/models/task_test.go
+func TestTaskValidateNegativeStatus(t *testing.T) {
+    now := time.Date(2026, 5, 15, 12, 0, 0, 0, time.UTC)
+    task := validTask(now)
+    task.Status = "bad" // некорректный статус
+    if err := task.Validate(now); err == nil {
+        t.Fatal("expected status validation error")
+    }
+}
+
+func TestTaskValidateNegativeDeadline(t *testing.T) {
+    now := time.Date(2026, 5, 15, 12, 0, 0, 0, time.UTC)
+    task := validTask(now)
+    task.Deadline = now.AddDate(0, 0, -1) // дедлайн в прошлом
+    if err := task.Validate(now); err == nil {
+        t.Fatal("expected deadline validation error")
+    }
+}
+```
+
+#### Граничные тесты (Boundary Tests)
+
+Проверка значений на границах допустимых диапазонов:
+
+```go
+// internal/models/task_test.go
+func TestTaskValidateBoundaryFields(t *testing.T) {
+    now := time.Date(2026, 5, 15, 12, 0, 0, 0, time.UTC)
+    task := validTask(now)
+    
+    // Минимальная длина названия (3 символа)
+    task.Title = strings.Repeat("a", 3)
+    // Максимальная длина описания (1000 символов)
+    task.Description = strings.Repeat("b", 1000)
+    // Максимальное количество тегов (10)
+    task.Tags = make([]Tag, 10)
+    
+    if err := task.Validate(now); err != nil {
+        t.Fatalf("expected boundary values to be valid: %v", err)
+    }
+    
+    // Максимальная длина названия (100 символов)
+    task.Title = strings.Repeat("a", 100)
+    if err := task.Validate(now); err != nil {
+        t.Fatalf("expected maximum title to be valid: %v", err)
+    }
+}
+```
+
+### 9.2. Тестовые файлы
+
+| Файл | Описание |
+|------|----------|
+| `internal/models/task_test.go` | Тесты валидации задач, изменения статуса |
+| `internal/models/project_test.go` | Тесты валидации проектов |
+| `internal/models/user_test.go` | Тесты валидации пользователей |
+| `internal/models/report_test.go` | Тесты нормализации типа отчёта |
+| `internal/service/task_test.go` | Тесты бизнес-логики задач и фасада |
+| `internal/service/report_test.go` | Тесты экспортёров, выбора стратегии экспорта и передачи `AssigneeID` в `TaskFilter` |
+
+### 9.3. Запуск тестов
+
+```bash
+# Запуск всех тестов
+go test ./...
+
+# Запуск тестов с покрытием
+go test -cover ./...
+
+# Запуск тестов с детальным выводом
+go test -v ./internal/models/...
+```
+
+---
+
+## 10. База данных
+
+### 10.1. Схема БД
+
+```sql
+-- Пользователи
+CREATE TABLE users (
+    id BIGSERIAL PRIMARY KEY,
+    login VARCHAR(50) NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    created_by BIGINT NOT NULL DEFAULT 0,
+    deleted_at TIMESTAMP NULL
+);
+
+-- Проекты
+CREATE TABLE projects (
+    id BIGSERIAL PRIMARY KEY,
+    name VARCHAR(80) NOT NULL,
+    description VARCHAR(500) NOT NULL DEFAULT '',
+    owner_id BIGINT NOT NULL REFERENCES users(id),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    created_by BIGINT NOT NULL DEFAULT 0,
+    deleted_at TIMESTAMP NULL
+);
+
+-- Задачи
+CREATE TABLE tasks (
+    id BIGSERIAL PRIMARY KEY,
+    project_id BIGINT NOT NULL REFERENCES projects(id),
+    title VARCHAR(100) NOT NULL,
+    description VARCHAR(1000) NOT NULL DEFAULT '',
+    status VARCHAR(20) NOT NULL,
+    priority VARCHAR(20) NOT NULL,
+    deadline DATE NOT NULL,
+    assignee_id BIGINT NOT NULL REFERENCES users(id),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    created_by BIGINT NOT NULL DEFAULT 0,
+    deleted_at TIMESTAMP NULL
+);
+
+-- Теги
+CREATE TABLE tags (
+    id BIGSERIAL PRIMARY KEY,
+    name VARCHAR(30) NOT NULL UNIQUE,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+-- Связь задач и тегов (многие-ко-многим)
+CREATE TABLE task_tags (
+    task_id BIGINT REFERENCES tasks(id) ON DELETE CASCADE,
+    tag_id BIGINT REFERENCES tags(id) ON DELETE CASCADE,
+    PRIMARY KEY (task_id, tag_id)
+);
+
+-- История изменения статусов
+CREATE TABLE task_history (
+    id BIGSERIAL PRIMARY KEY,
+    task_id BIGINT REFERENCES tasks(id) ON DELETE CASCADE,
+    old_status VARCHAR(20) NOT NULL,
+    new_status VARCHAR(20) NOT NULL,
+    changed_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+```
+
+### 10.2. Запуск PostgreSQL
+
+```bash
+# Запуск через docker-compose
+docker-compose up -d postgres
+
+# Миграция копируется Dockerfile в /docker-entrypoint-initdb.d
+# и применяется автоматически при первом создании volume.
+```
+
+---
+
+## 11. Веб-интерфейс
+
+### 11.1. Структура HTML-страницы
+
+Фронтенд реализован как единый HTML-файл с серверным рендерингом через Go-шаблоны.
+
+**Секции страницы:**
+
+1. **Регистрация** — форма создания нового пользователя
+2. **Вход** — форма аутентификации
+3. **Проекты** — создание и просмотр проектов
+4. **Задачи** — создание и просмотр задач текущего пользователя
+5. **Статусы** — изменение статуса задачи
+6. **Отчёты** — экспорт задач в JSON/XML/HTML
+
+### 11.2. Функциональность фронтенда
+
+- Асинхронные запросы через fetch API
+- Отображение HTML, JSON и XML без скачивания
+- Валидация форм на стороне клиента
+- Адаптивный дизайн
+
+---
 
 ## 12. Логирование
 
-Логирование реализовано в [`pkg/logger`](pkg/logger/logger.go) на базе стандартного пакета `log/slog`.
+### 12.1. Реализация
 
-Структура [`Logger`](pkg/logger/logger.go#L8-L16) содержит `slog.Logger`. Методы:
+Логирование реализовано через интерфейс `AppLogger`:
 
-- [`Info`](pkg/logger/logger.go#L18-L20) пишет информационные сообщения;
-- [`Error`](pkg/logger/logger.go#L22-L24) пишет ошибки.
-
-Логирование используется в сервисах:
-
-- регистрация и вход пользователя: [`UserService`](internal/service/user.go#L38-L90);
-- создание проекта: [`ProjectService.Create`](internal/service/project.go#L26-L47);
-- создание задачи и смена статуса: [`TaskFacade`](internal/service/task.go#L40-L133);
-- построение отчета: [`ReportService.Build`](internal/service/report.go#L73-L87).
-
-## 13. База данных
-
-Данные хранятся в PostgreSQL. PostgreSQL поднимается через [`docker-compose.yml`](docker-compose.yml) и [`build/Dockerfile`](build/Dockerfile).
-
-Схема БД находится в [`migrations/001_init.sql`](migrations/001_init.sql).
-
-Структура таблиц:
-
-| Таблица | Где описана | Назначение | Основные поля |
-|---|---|---|---|
-| `users` | [`001_init.sql`](migrations/001_init.sql#L1-L9) | Хранит пользователей приложения. Пользователь может быть владельцем проекта или исполнителем задачи. | `id`, `login`, `password_hash`, `created_at`, `updated_at`, `created_by`, `deleted_at` |
-| `projects` | [`001_init.sql`](migrations/001_init.sql#L11-L20) | Хранит проекты. Проект объединяет задачи и имеет владельца. | `id`, `name`, `description`, `owner_id`, `created_at`, `updated_at`, `created_by`, `deleted_at` |
-| `tasks` | [`001_init.sql`](migrations/001_init.sql#L22-L35) | Хранит задачи. Задача принадлежит проекту и назначается пользователю. | `id`, `project_id`, `title`, `description`, `status`, `priority`, `deadline`, `assignee_id`, `created_at`, `updated_at`, `created_by`, `deleted_at` |
-| `tags` | [`001_init.sql`](migrations/001_init.sql#L37-L42) | Хранит уникальные теги задач. | `id`, `name`, `created_at`, `updated_at` |
-| `task_tags` | [`001_init.sql`](migrations/001_init.sql#L44-L48) | Связующая таблица для связи задач и тегов многие-ко-многим. | `task_id`, `tag_id` |
-| `task_history` | [`001_init.sql`](migrations/001_init.sql#L50-L56) | Хранит историю изменения статусов задач. | `id`, `task_id`, `old_status`, `new_status`, `changed_at` |
-
-Связи в БД:
-
-- `projects.owner_id` ссылается на `users.id`, то есть у проекта есть владелец;
-- `tasks.project_id` ссылается на `projects.id`, то есть задача принадлежит проекту;
-- `tasks.assignee_id` ссылается на `users.id`, то есть задача назначается пользователю;
-- `task_tags.task_id` ссылается на `tasks.id`;
-- `task_tags.tag_id` ссылается на `tags.id`;
-- `task_history.task_id` ссылается на `tasks.id` и удаляется каскадно вместе с задачей.
-
-Загрузка и сохранение данных реализованы в репозиториях:
-
-- [`UserRepository`](internal/repository/user.go#L10-L59);
-- [`ProjectRepository`](internal/repository/project.go#L10-L88);
-- [`TaskRepository`](internal/repository/task.go#L12-L195).
-
-## 14. Веб-интерфейс
-
-Фронтенд находится в [`frontend/index.html`](frontend/index.html).
-
-Интерфейс содержит:
-
-- форму регистрации;
-- форму входа;
-- персональную страницу пользователя;
-- кнопку выхода;
-- форму создания проекта;
-- форму создания задачи;
-- форму фильтрации задач;
-- таблицу задач;
-- форму смены статуса;
-- блок отчета.
-
-HTTP-маршруты задаются в [`Server.Routes`](internal/app/task.go#L44-L55):
-
-- `/` - главная страница;
-- `/register` - регистрация пользователя;
-- `/login` - вход пользователя;
-- `/logout` - выход пользователя;
-- `/me` - персональная страница пользователя;
-- `/projects` - создание проекта;
-- `/tasks` - создание задачи;
-- `/tasks/status` - смена статуса;
-- `/report` - построение отчета.
-
-## 15. Unit-тестирование
-
-По требованию КМ-5 unit-тесты должны проверять отдельные модули исходного кода. В проекте тестируется нетривиальная бизнес-логика, а не работа браузера или реальной БД.
-
-Тесты моделей:
-
-| Тест | Где реализован | Что проверяет | Вид теста |
-|---|---|---|---|
-| `TestUserValidatePositive` | [`user_test.go`](internal/models/user_test.go#L8-L13) | Пользователь с корректным `login` проходит валидацию. | Позитивный |
-| `TestUserValidateNegativeLoginWithSpace` | [`user_test.go`](internal/models/user_test.go#L15-L20) | Логин с пробелом возвращает ошибку. | Негативный |
-| `TestUserValidateBoundaryLogin` | [`user_test.go`](internal/models/user_test.go#L22-L33) | `User.login` ровно 3 и 50 символов допустим. | Граничный |
-| `TestProjectValidatePositive` | [`project_test.go`](internal/models/project_test.go#L8-L13) | Проект с корректными данными проходит валидацию. | Позитивный |
-| `TestProjectValidateNegativeOwner` | [`project_test.go`](internal/models/project_test.go#L15-L20) | `owner_id = 0` возвращает ошибку. | Негативный |
-| `TestProjectValidateBoundaryName` | [`project_test.go`](internal/models/project_test.go#L22-L33) | `Project.name` ровно 3 и 80 символов допустим. | Граничный |
-| `TestTaskValidatePositive` | [`task_test.go`](internal/models/task_test.go#L22-L28) | Задача с корректными данными проходит валидацию. | Позитивный |
-| `TestTaskValidateNegativeStatus` | [`task_test.go`](internal/models/task_test.go#L30-L37) | Недопустимый статус возвращает ошибку. | Негативный |
-| `TestTaskValidateNegativeDeadline` | [`task_test.go`](internal/models/task_test.go#L39-L46) | Дедлайн в прошлом возвращает ошибку. | Негативный |
-| `TestTaskValidateBoundaryFields` | [`task_test.go`](internal/models/task_test.go#L48-L65) | Границы `title`, `description`, 10 тегов и дедлайн сегодня. | Граничный |
-| `TestTaskValidateNegativeTooManyTags` | [`task_test.go`](internal/models/task_test.go#L67-L77) | 11 тегов возвращают ошибку. | Негативный |
-| `TestTaskChangeStatus` | [`task_test.go`](internal/models/task_test.go#L79-L94) | Смена статуса меняет статус и создает историю. | Позитивный |
-| `TestTagValidateBoundary` | [`task_test.go`](internal/models/task_test.go#L96-L102) | `Tag.name` ровно 2 и 30 символов допустим. | Граничный |
-| `TestReportTypeNormalize` | [`report_test.go`](internal/models/report_test.go#L5-L22) | Пустой тип отчета превращается в `status`, явный тип сохраняется. | Позитивный, граничный |
-
-Тесты сервисов и паттернов:
-
-| Тест | Где реализован | Что проверяет | Вид теста |
-|---|---|---|---|
-| `TestSelectReportStrategy` | [`report_test.go`](internal/service/report_test.go#L30-L59) | Выбор стратегий `status`, `priority`, `assignee` и построение отчета. | Позитивный, Strategy |
-| `TestSelectReportStrategyNegative` | [`report_test.go`](internal/service/report_test.go#L61-L65) | Неизвестный тип отчета возвращает ошибку. | Негативный, Strategy |
-| `TestReportServiceBuildUsesSelectedStrategy` | [`report_test.go`](internal/service/report_test.go#L70-L89) | `ReportService.Build` выбирает стратегию и строит отчет через общий интерфейс `ReportStrategy`. | Позитивный, Strategy, полиморфизм |
-| `TestTaskFacadeCreatePositive` | [`task_test.go`](internal/service/task_test.go#L87-L115) | `TaskFacade` успешно создает задачу при корректных данных. | Позитивный, Facade |
-| `TestTaskFacadeCreateNegativeValidation` | [`task_test.go`](internal/service/task_test.go#L117-L145) | При ошибке валидации задача не сохраняется и ошибка логируется. | Негативный, Facade |
-| `TestTaskFacadeChangeStatusWritesHistory` | [`task_test.go`](internal/service/task_test.go#L147-L180) | Смена статуса через фасад сохраняет статус и историю. | Позитивный, Facade |
-| `TestTaskFacadeChangeStatusForAssigneeRejectsAnotherUser` | [`task_test.go`](internal/service/task_test.go#L198-L225) | Пользователь не может изменить статус чужой задачи. | Негативный, Facade |
-| `TestUserServiceRegisterAndLoginPositive` | [`user_test.go`](internal/service/user_test.go#L71-L93) | Регистрация хеширует пароль, а вход с правильным паролем успешен. | Позитивный, Auth |
-| `TestUserServiceRegisterNegativePassword` | [`user_test.go`](internal/service/user_test.go#L95-L100) | Слишком короткий пароль возвращает ошибку. | Негативный, Auth |
-| `TestUserServiceLoginNegativePassword` | [`user_test.go`](internal/service/user_test.go#L102-L111) | Неверный пароль при входе возвращает ошибку. | Негативный, Auth |
-| `TestManagerGenerateAndValidate` | [`jwt_test.go`](pkg/auth/jwt_test.go#L8-L21) | JWT создается и успешно проверяется. | Позитивный, JWT |
-| `TestManagerValidateNegativeSignature` | [`jwt_test.go`](pkg/auth/jwt_test.go#L23-L33) | JWT с неверной подписью отклоняется. | Негативный, JWT |
-
-Для тестов сервисного слоя используются fake-репозитории и fake-логгер:
-
-- [`fakeLogger`](internal/service/task_test.go#L11-L19);
-- [`fakeUsers`](internal/service/task_test.go#L21-L40);
-- [`fakeProjects`](internal/service/task_test.go#L42-L57);
-- [`fakeTasks`](internal/service/task_test.go#L59-L85).
-
-Так тесты остаются unit-тестами и не требуют PostgreSQL.
-
-Запуск тестов:
-
-```bash
-go test ./...
+```go
+// internal/service/user.go
+type AppLogger interface {
+    Info(msg string, args ...any)
+    Error(msg string, args ...any)
+}
 ```
 
-Если Go в текущей среде не может писать в стандартный cache, можно использовать:
+### 12.2. Использование
 
-```bash
-GOCACHE=/private/tmp/go-build GOMODCACHE=/private/tmp/go-mod go test ./...
+```go
+func (f *TaskFacade) Create(ctx context.Context, task models.Task) (models.Task, error) {
+    f.logger.Info("creating task", "title", task.Title)
+    
+    if err := task.Validate(f.now()); err != nil {
+        f.logger.Error("task validation failed", "error", err)
+        return models.Task{}, err
+    }
+    // ...
+}
 ```
 
-## 16. Итог реализации
+---
 
-В проекте реализовано:
+## 13. Итог реализации
 
-- веб-приложение на Go;
-- регистрация и вход через JWT;
-- персональная страница пользователя;
-- стандартная точка входа [`cmd/taskflow/main.go`](cmd/taskflow/main.go);
-- PostgreSQL через Docker;
-- модели предметной области;
-- репозитории для работы с БД;
-- сервисный слой;
-- паттерн `Facade`;
-- паттерн `Strategy`;
-- логирование;
-- минимальный HTML-интерфейс;
-- unit-тесты;
-- документация по требованиям КМ-4 и КМ-5.
+### 13.1. Выполненные требования
+
+| Требование | Статус |
+|------------|--------|
+| Не менее 8 классов | ✅ 8+ моделей |
+| Инкапсуляция | ✅ Приватные поля, методы |
+| Абстракция | ✅ Интерфейсы TaskStore, ProjectStore, UserStore, ReportExporter |
+| Полиморфизм | ✅ Реализация через интерфейсы |
+| Наследование одиночное | ✅ BaseEntity → Task, Project, User |
+| Наследование множественное | ✅ User, Project и Task встраивают несколько структур |
+| Конфликт методов | ✅ GetID() в нескольких структурах с разрешением |
+| Связи объектов | ✅ Ассоциация, агрегация, композиция, зависимость |
+| Паттерн Facade | ✅ TaskFacade |
+| Паттерн Strategy | ✅ ReportExporter (JSON, XML, HTML) |
+| Логирование | ✅ AppLogger |
+| Загрузка из БД | ✅ PostgreSQL |
+| Unit-тестирование | ✅ Позитивные, негативные, граничные тесты |
+
+### 13.2. Технологический стек
+
+- **Язык:** Go 1.21+
+- **База данных:** PostgreSQL
+- **Фронтенд:** HTML/CSS/JavaScript
+- **Аутентификация:** JWT
+- **Тестирование:** Go testing package
